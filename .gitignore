@@ -1,0 +1,17 @@
+## .NET
+bin/
+obj/
+dist/
+*.user
+
+## Visual Studio / Rider
+.vs/
+.idea/
+*.suo
+
+## テスト・カバレッジ出力
+TestResults/
+
+## 各Phaseの手動検証で使った使い捨てコード(本実装には含めない)
+_spike/
+_verify*/

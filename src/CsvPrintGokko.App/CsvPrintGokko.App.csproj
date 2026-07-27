@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\CsvPrintGokko.Core\CsvPrintGokko.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- 保存先フォルダ選択ダイアログ(FolderBrowserDialog)のためWindows Formsを有効化 -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- ダブルクリック起動時にコンソールウィンドウを表示しない -->
+    <OutputType>WinExe</OutputType>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>CSV差込印刷ツール</title>
+  <link rel="stylesheet" href="css/site.css" />
+</head>
+<body>
+  <div class="home-page">
+    <h1>CSV差込印刷ツール</h1>
+    <div id="error" class="error-banner hidden"></div>
+
+    <button id="createButton" class="btn btn-primary home-cta">
+      ＋ 新規プロジェクトを作成(PDFテンプレートを選択)
+    </button>
+    <input type="file" id="pdfFileInput" accept="application/pdf" class="hidden" />
+
+    <div>
+      <div class="home-list-title">最近使用したテンプレート</div>
+      <div id="templateList" class="home-list"></div>
+      <div id="emptyHint" class="empty-hint hidden">まだテンプレートがありません。「新規プロジェクトを作成」から始めてください。</div>
+    </div>
+  </div>
+
+  <div id="nameModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <h2>テンプレート名を入力</h2>
+      <input type="text" id="templateNameInput" class="text-input" placeholder="例: 請求書テンプレート" />
+      <div class="modal-actions">
+        <button id="nameCancelButton" class="btn">キャンセル</button>
+        <button id="nameConfirmButton" class="btn btn-primary">作成</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/home.js"></script>
+</body>
+</html>
