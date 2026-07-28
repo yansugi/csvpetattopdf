@@ -12,6 +12,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <!-- ダブルクリック起動時にコンソールウィンドウを表示しない -->
     <OutputType>WinExe</OutputType>
+    <!-- 単一ユーザー向けのローカルツールのため、多コア向けのServer GCではなくメモリ効率重視のWorkstation GCを使う -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
   </PropertyGroup>
 
 </Project>

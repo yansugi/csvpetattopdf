@@ -66,3 +66,13 @@ export async function renderPreview(templateId, fields, csvSessionId, rowIndex) 
   }));
   return res.blob();
 }
+
+/// <summary>JavaScript式エディタの「実行してテスト」用。csvSessionIdがnullなら空データで評価する。</summary>
+export async function testJsFormula(script, csvSessionId, rowIndex) {
+  const res = await assertOk(await fetch('/api/formula/test-js', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ script, csvSessionId: csvSessionId ?? null, rowIndex: rowIndex ?? null })
+  }));
+  return res.json();
+}

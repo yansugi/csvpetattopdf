@@ -67,15 +67,25 @@ public sealed class PdfComposerService
             if (field.Kind == FieldKind.Text)
             {
                 // 固定テキストでも"{列名}"はCSVの実データに置換してから描画する(それ以外の部分は行に依らず固定)。
-                string resolvedText = TextVariableResolver.Resolve(field.StaticText ?? string.Empty, rowData);
+                string resolvedText = TextVariableResolver.Resolve(field.StaticText ?? string.Empty, rowData, rowNumber);
                 DrawField(gfx, page, field, resolvedText);
             }
             else if (field.Kind == FieldKind.Calc)
             {
-                // 計算式の評価に失敗した場合(参照列が無い/0除算/構文エラー等)は#ERRORとして可視化する。
-                string calcText = FormulaEvaluator.TryEvaluate(field.Formula ?? string.Empty, rowData, rowNumber, out double calcResult)
-                    ? CsvValueFormatter.FormatNumberValue(field, calcResult)
-                    : "#ERROR";
+                // 計算式の評価に失敗した場合(参照列が無い/0除算/構文エラー/JS実行エラー等)は#ERRORとして可視化する。
+                string calcText;
+                if (field.UseJavaScriptFormula)
+                {
+                    calcText = JsFormulaEvaluator.TryEvaluate(field.JavaScriptFormula ?? string.Empty, rowData, rowNumber, out var jsResult)
+                        ? (jsResult.IsNumber ? CsvValueFormatter.FormatNumberValue(field, jsResult.NumberValue) : jsResult.DisplayText)
+                        : "#ERROR";
+                }
+                else
+                {
+                    calcText = FormulaEvaluator.TryEvaluate(field.Formula ?? string.Empty, rowData, rowNumber, out double calcResult)
+                        ? CsvValueFormatter.FormatNumberValue(field, calcResult)
+                        : "#ERROR";
+                }
                 DrawField(gfx, page, field, calcText);
             }
             // CSVに対応する列が無い場合は描画をスキップする(列マッピングの不整合はPhase 4のUIで警告する想定)。

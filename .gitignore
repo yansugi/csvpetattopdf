@@ -4,6 +4,9 @@ obj/
 dist/
 *.user
 
+## 配布用パッケージ(dotnet publishの成果物をzip化したもの)
+*.zip
+
 ## Visual Studio / Rider
 .vs/
 .idea/

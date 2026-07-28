@@ -15,8 +15,18 @@ public sealed record FieldDefinition
     /// <summary>
     /// Kind=Calcのときに評価する計算式(例: "{単価}*{数量}")。
     /// "{列名}"でCSVの値、"{行番号}"で1始まりの行番号を参照でき、+ - * / ( ) の四則演算が使える。
+    /// UseJavaScriptFormula=trueのときは使用しない。
     /// </summary>
     public string? Formula { get; init; }
+
+    /// <summary>trueの場合、Kind=CalcのフィールドはFormulaの代わりにJavaScriptFormulaをJavaScript式として評価する。</summary>
+    public bool UseJavaScriptFormula { get; init; }
+
+    /// <summary>
+    /// UseJavaScriptFormula=trueのときに評価するJavaScript式(例: "Number(row[\"単価\"]) * Number(row[\"数量\"])")。
+    /// row[列名]でCSVの値(文字列)、rowNumberで1始まりの行番号を参照できる。
+    /// </summary>
+    public string? JavaScriptFormula { get; init; }
 
     /// <summary>配置エディタ上での表示名(任意、Kind=Csvのみ使用)。未設定ならCsvColumnをそのまま表示する。PDF出力には影響しない。</summary>
     public string? Label { get; init; }

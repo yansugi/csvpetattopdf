@@ -63,7 +63,7 @@
         <span class="field-label">CSVファイル</span>
         <div class="prop-row-inline">
           <input type="text" id="csvPathDisplay" class="text-input mono-input" readonly placeholder="ファイルが選択されていません" />
-          <button id="csvBrowseButton" class="btn" type="button">ファイルを選択</button>
+          <button id="csvBrowseButton" class="btn btn-file-select" type="button">ファイルを選択</button>
         </div>
       </div>
       <div class="prop-row">
@@ -87,8 +87,26 @@
     </div>
   </div>
 
+  <div id="jsEditorModal" class="modal-backdrop hidden">
+    <div class="modal-card js-editor-card">
+      <h2>JavaScript式エディタ</h2>
+      <div id="jsEditorVariableRow"></div>
+      <div id="monacoContainer" class="monaco-container"></div>
+      <div class="js-editor-run-row">
+        <button type="button" class="btn" id="jsEditorRunButton">▶ 実行してテスト</button>
+        <span class="field-hint" id="jsEditorRunHint">CSV読込中は現在プレビュー中の行のデータでテストします。</span>
+      </div>
+      <pre id="jsEditorConsole" class="js-editor-console"></pre>
+      <div class="modal-actions">
+        <button id="jsEditorCancelButton" class="btn">キャンセル</button>
+        <button id="jsEditorApplyButton" class="btn btn-primary">適用</button>
+      </div>
+    </div>
+  </div>
+
   <div id="error" class="error-banner hidden" style="position:fixed; bottom:60px; left:50%; transform:translateX(-50%); z-index:100;"></div>
 
+  <script src="lib/monaco-editor/vs/loader.js"></script>
   <script type="module" src="js/editor.js"></script>
 </body>
 </html>

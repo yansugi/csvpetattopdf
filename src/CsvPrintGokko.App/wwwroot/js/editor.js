@@ -1,4 +1,4 @@
-import { getTemplate, saveLayout, templatePdfUrl, browseCsvFile, loadCsvFromPath, renderPreview } from './api-client.js';
+import { getTemplate, saveLayout, templatePdfUrl, browseCsvFile, loadCsvFromPath, renderPreview, testJsFormula } from './api-client.js';
 import { renderPdfToCanvas, pxToPt, ptToPx } from './pdf-canvas.js';
 
 // Windows環境に標準で入っていることが多いフォントの固定リスト(動的列挙は初回取得が重いため採用しない)。
@@ -82,6 +82,13 @@ const zoomOutButton = document.getElementById('zoomOutButton');
 const zoomLabel = document.getElementById('zoomLabel');
 const staticTextChip = document.getElementById('staticTextChip');
 const calcChip = document.getElementById('calcChip');
+const jsEditorModal = document.getElementById('jsEditorModal');
+const jsEditorCancelButton = document.getElementById('jsEditorCancelButton');
+const jsEditorApplyButton = document.getElementById('jsEditorApplyButton');
+const monacoContainer = document.getElementById('monacoContainer');
+const jsEditorVariableRow = document.getElementById('jsEditorVariableRow');
+const jsEditorRunButton = document.getElementById('jsEditorRunButton');
+const jsEditorConsole = document.getElementById('jsEditorConsole');
 
 staticTextChip.addEventListener('dragstart', (e) => {
   e.dataTransfer.setData('text/field-kind', 'text');
@@ -89,6 +96,126 @@ staticTextChip.addEventListener('dragstart', (e) => {
 
 calcChip.addEventListener('dragstart', (e) => {
   e.dataTransfer.setData('text/field-kind', 'calc');
+});
+
+// --- JavaScript式エディタ(Monaco、モーダル表示) ---
+let monacoEditorInstance = null;
+let monacoLoadPromise = null;
+let jsEditorTargetField = null; // モーダルで現在編集中のフィールド
+
+/// <summary>Monaco Editor(AMDローダー経由、lib/monaco-editorにオフライン同梱)を初回のみ読み込み・生成する。</summary>
+function loadMonaco() {
+  if (monacoLoadPromise) return monacoLoadPromise;
+  monacoLoadPromise = new Promise((resolve, reject) => {
+    if (!window.require) {
+      reject(new Error('Monaco Editorのローダー(loader.js)が読み込まれていません。'));
+      return;
+    }
+    window.require.config({ paths: { vs: 'lib/monaco-editor/vs' } });
+    window.require(['vs/editor/editor.main'], () => {
+      monacoEditorInstance = window.monaco.editor.create(monacoContainer, {
+        value: '',
+        language: 'javascript',
+        theme: 'vs-dark',
+        automaticLayout: true,
+        minimap: { enabled: false },
+        fontSize: 14
+      });
+      resolve(monacoEditorInstance);
+    }, reject);
+  });
+  return monacoLoadPromise;
+}
+
+/// <summary>fieldのJavaScript式をMonacoエディタのモーダルで開く。</summary>
+async function openJsEditor(field) {
+  jsEditorTargetField = field;
+  jsEditorModal.classList.remove('hidden');
+  jsEditorConsole.textContent = '';
+  jsEditorConsole.classList.remove('has-error');
+  renderJsEditorVariableButtons();
+  try {
+    const editorInstance = await loadMonaco();
+    editorInstance.setValue(field.javaScriptFormula ?? '');
+    editorInstance.focus();
+  } catch (err) {
+    showError(`コードエディタの読み込みに失敗しました: ${err.message}`);
+  }
+}
+
+/// <summary>
+/// モーダル内の変数挿入ボタンを描画し、クリック時にMonacoエディタのカーソル位置(または選択範囲)へ
+/// "row["列名"]" / "rowNumber" を挿入する。CSV未読込時など列が無ければ何も表示しない。
+/// </summary>
+function renderJsEditorVariableButtons() {
+  jsEditorVariableRow.innerHTML = buildVariableInsertRowHtml(['行番号']);
+  jsEditorVariableRow.querySelectorAll('.variable-chip-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!monacoEditorInstance) return;
+      const token = btn.dataset.token;
+      const insertText = token === '行番号' ? 'rowNumber' : `row["${token}"]`;
+      monacoEditorInstance.executeEdits('insert-variable', [{
+        range: monacoEditorInstance.getSelection(),
+        text: insertText,
+        forceMoveMarkers: true
+      }]);
+      monacoEditorInstance.focus();
+    });
+  });
+}
+
+function closeJsEditor() {
+  jsEditorModal.classList.add('hidden');
+  jsEditorTargetField = null;
+}
+
+/// <summary>
+/// エディタ内の現在の式をサーバー(Jint)でテスト実行し、console.logの出力と評価結果(または
+/// エラー内容)をコンソール欄に表示する。CSV読込中は現在プレビュー中の行のデータを使う。
+/// </summary>
+async function runJsEditorTest() {
+  if (!monacoEditorInstance) return;
+  const script = monacoEditorInstance.getValue();
+  jsEditorRunButton.disabled = true;
+  jsEditorConsole.classList.remove('has-error');
+  jsEditorConsole.textContent = '実行中...';
+  try {
+    const rowIndex = csvRowCount > 0 ? currentRowIndex : null;
+    const result = await testJsFormula(script, csvSessionId, rowIndex);
+    renderJsEditorConsoleResult(result);
+  } catch (err) {
+    jsEditorConsole.classList.add('has-error');
+    jsEditorConsole.textContent = `テスト実行に失敗しました: ${err.message}`;
+  } finally {
+    jsEditorRunButton.disabled = false;
+  }
+}
+
+/// <summary>testJsFormulaの結果をコンソール欄向けのテキストに整形して表示する。</summary>
+function renderJsEditorConsoleResult(result) {
+  const lines = result.consoleLines.map((line) => `console.log: ${line}`);
+  if (result.success) {
+    const resultText = result.isNumber ? String(result.numberValue) : (result.displayText || '(空文字)');
+    lines.push(`→ 結果: ${resultText}`);
+    jsEditorConsole.classList.remove('has-error');
+  } else {
+    lines.push(`→ エラー: ${result.errorMessage || '式の評価に失敗しました(PDF上では#ERRORと表示されます)'}`);
+    jsEditorConsole.classList.add('has-error');
+  }
+  jsEditorConsole.textContent = lines.join('\n');
+}
+
+jsEditorRunButton.addEventListener('click', runJsEditorTest);
+
+jsEditorCancelButton.addEventListener('click', closeJsEditor);
+
+jsEditorApplyButton.addEventListener('click', () => {
+  if (!jsEditorTargetField || !monacoEditorInstance) return;
+  jsEditorTargetField.javaScriptFormula = monacoEditorInstance.getValue();
+  renderFieldChips();
+  renderPropsPanel();
+  commitHistory();
+  closeJsEditor();
 });
 
 function showError(message) {
@@ -238,6 +365,8 @@ async function init() {
     if (field.booleanTrueDisplay == null) field.booleanTrueDisplay = '✓';
     if (field.booleanFalseDisplay == null) field.booleanFalseDisplay = '';
     if (field.formula == null) field.formula = '';
+    if (field.useJavaScriptFormula == null) field.useJavaScriptFormula = false;
+    if (field.javaScriptFormula == null) field.javaScriptFormula = '';
   }
   resetHistory();
 
@@ -335,10 +464,17 @@ function renderPalette() {
   }
   paletteEmptyHint.classList.add('hidden');
   for (const header of csvHeaders) {
+    // 既にこの列を使っているCSVフィールドがあれば「使用済み」であることが分かるようにする(何個使っていても件数を表示)。
+    const usedCount = layout.fields.filter((f) => f.kind === 'csv' && f.csvColumn === header).length;
     const chip = document.createElement('div');
-    chip.className = 'csv-chip';
+    chip.className = `csv-chip${usedCount > 0 ? ' used' : ''}`;
     chip.draggable = true;
-    chip.innerHTML = `<span class="grip">⋮⋮</span> ${escapeHtml(header)}`;
+    chip.title = usedCount > 0 ? `配置済み(${usedCount}箇所)` : '';
+    chip.innerHTML = `
+      <span class="grip">⋮⋮</span>
+      <span class="csv-chip-label">${escapeHtml(header)}</span>
+      ${usedCount > 0 ? `<span class="csv-chip-used-badge">✓${usedCount > 1 ? `×${usedCount}` : ''}</span>` : ''}
+    `;
     chip.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('text/csv-column', header);
     });
@@ -366,6 +502,8 @@ pdfStage.addEventListener('drop', (e) => {
     csvColumn: isToolField ? null : column,
     staticText: fieldKind === 'text' ? 'テキスト' : null,
     formula: '',
+    useJavaScriptFormula: false,
+    javaScriptFormula: '',
     label: null,
     x: pxToPt(xPx, displayScale),
     y: pxToPt(yPx, displayScale),
@@ -397,7 +535,15 @@ pdfStage.addEventListener('drop', (e) => {
 
 // --- 配置キャンバス上のフィールドチップ ---
 function renderFieldChips() {
+  // パレット上の「使用済み」表示をフィールド変更のたびに最新化する。
+  // 呼び出し元(追加/削除/列変更/Undo・Redo等)ごとに個別対応するより、ここで一括して合わせる方が漏れがない。
+  renderPalette();
+
   pdfStage.querySelectorAll('.field-chip').forEach((el) => el.remove());
+  // プレビュー中はshowPreview()が描画した実PDFの見た目だけを見せる。
+  // pdfStageの背景クリック(selectField(null)経由)等、プレビュー中でも呼ばれ得る経路があるため、
+  // 呼び出し元ごとに個別対応するのではなくここで一括してガードする。
+  if (isPreviewMode) return;
 
   for (const field of layout.fields) {
     const chip = document.createElement('div');
@@ -417,7 +563,11 @@ function renderFieldChips() {
     if (field.kind === 'text') {
       content.textContent = field.staticText || '(空のテキスト)';
     } else if (field.kind === 'calc') {
-      content.textContent = field.formula ? `= ${field.formula}` : '(計算式未設定)';
+      if (field.useJavaScriptFormula) {
+        content.textContent = field.javaScriptFormula ? `= JS: ${field.javaScriptFormula}` : '(JS式未設定)';
+      } else {
+        content.textContent = field.formula ? `= ${field.formula}` : '(計算式未設定)';
+      }
     } else {
       content.textContent = field.label || field.csvColumn;
     }
@@ -493,7 +643,11 @@ function shrinkChipFontToFit(content) {
   }
 }
 
-pdfStage.addEventListener('click', () => selectField(null));
+pdfStage.addEventListener('click', () => {
+  // プレビュー中の背景クリックでは選択解除しない(編集モードに戻したときに選択状態を保ちたいため)。
+  if (isPreviewMode) return;
+  selectField(null);
+});
 
 function selectField(fieldId) {
   selectedFieldId = fieldId;
@@ -707,12 +861,15 @@ function buildVariableInsertRowHtml(extraTokens = []) {
   </div>`;
 }
 
-/// <summary>変数挿入ボタンのクリックで、targetInputIdの要素のカーソル位置に"{トークン}"を挿入する。</summary>
-function wireVariableInsertButtons(targetInputId, onInsert) {
+/// <summary>
+/// 変数挿入ボタンのクリックで、targetInputIdの要素のカーソル位置にトークンを挿入する。
+/// formatTokenで挿入する実際の文字列を指定できる(既定は"{トークン}"、JavaScript式では別の書式を使う)。
+/// </summary>
+function wireVariableInsertButtons(targetInputId, onInsert, formatToken = (token) => `{${token}}`) {
   propsPanel.querySelectorAll('.variable-chip-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const targetEl = document.getElementById(targetInputId);
-      const insertText = `{${btn.dataset.token}}`;
+      const insertText = formatToken(btn.dataset.token);
       const start = targetEl.selectionStart ?? targetEl.value.length;
       const end = targetEl.selectionEnd ?? targetEl.value.length;
       targetEl.value = targetEl.value.slice(0, start) + insertText + targetEl.value.slice(end);
@@ -753,17 +910,32 @@ function renderPropsPanel() {
     <div class="prop-row">
       <span class="field-label">テキスト内容(改行可)</span>
       <textarea class="text-input" id="propStaticText" rows="3">${escapeHtml(field.staticText ?? '')}</textarea>
-      <div class="field-hint">CSVの列を <code>{列名}</code> の形式で埋め込むと、行ごとの値に置き換わります(例: こんにちは、{氏名}様)。</div>
-      ${buildVariableInsertRowHtml()}
+      <div class="field-hint">CSVの列を <code>{列名}</code>、行番号を <code>{行番号}</code> の形式で埋め込むと、行ごとの値に置き換わります(例: こんにちは、{氏名}様/No.{行番号})。</div>
+      ${buildVariableInsertRowHtml(['行番号'])}
     </div>`;
   } else if (field.kind === 'calc') {
-    sourceRowsHtml = `
+    const jsMode = !!field.useJavaScriptFormula;
+    const formulaRowHtml = jsMode
+      ? `
+    <div class="prop-row">
+      <span class="field-label">JavaScript式</span>
+      <textarea class="text-input mono-input" id="propJsFormula" rows="3" placeholder='Number(row["単価"]) * Number(row["数量"])'>${escapeHtml(field.javaScriptFormula ?? '')}</textarea>
+      <button type="button" class="btn" id="propJsFormulaOpenEditor">🖥 コードエディタで開く</button>
+      <div class="field-hint">CSVの値は <code>row["列名"]</code>、行番号は <code>rowNumber</code> で参照できます。三項演算子等での条件分岐も書けます。エラーやタイムアウトの場合は #ERROR と表示されます。</div>
+      ${buildVariableInsertRowHtml(['行番号'])}
+    </div>`
+      : `
     <div class="prop-row">
       <span class="field-label">計算式</span>
       <input type="text" class="text-input mono-input" id="propFormula" value="${escapeHtml(field.formula ?? '')}" placeholder="{単価}*{数量}" />
       <div class="field-hint">CSVの列を <code>{列名}</code>、行番号を <code>{行番号}</code> として使い、+ - * / ( ) の式が書けます。参照列が無い・0除算などの場合は #ERROR と表示されます。</div>
       ${buildVariableInsertRowHtml(['行番号'])}
+    </div>`;
+    sourceRowsHtml = `
+    <div class="prop-row">
+      <label><input type="checkbox" id="propUseJs" ${jsMode ? 'checked' : ''} /> 高度な設定: JavaScript式を使う</label>
     </div>
+    ${formulaRowHtml}
     ${buildNumberFormatRowsHtml(field)}`;
   } else {
     sourceRowsHtml = `
@@ -874,16 +1046,36 @@ function renderPropsPanel() {
       commitHistory();
     });
   } else if (field.kind === 'calc') {
-    document.getElementById('propFormula').addEventListener('input', (e) => {
-      field.formula = e.target.value;
+    document.getElementById('propUseJs').addEventListener('change', (e) => {
+      field.useJavaScriptFormula = e.target.checked;
       renderFieldChips();
-    });
-    document.getElementById('propFormula').addEventListener('change', commitHistory);
-    wireVariableInsertButtons('propFormula', (value) => {
-      field.formula = value;
-      renderFieldChips();
+      renderPropsPanel();
       commitHistory();
     });
+    if (field.useJavaScriptFormula) {
+      document.getElementById('propJsFormula').addEventListener('input', (e) => {
+        field.javaScriptFormula = e.target.value;
+        renderFieldChips();
+      });
+      document.getElementById('propJsFormula').addEventListener('change', commitHistory);
+      wireVariableInsertButtons('propJsFormula', (value) => {
+        field.javaScriptFormula = value;
+        renderFieldChips();
+        commitHistory();
+      }, (token) => (token === '行番号' ? 'rowNumber' : `row["${token}"]`));
+      document.getElementById('propJsFormulaOpenEditor').addEventListener('click', () => openJsEditor(field));
+    } else {
+      document.getElementById('propFormula').addEventListener('input', (e) => {
+        field.formula = e.target.value;
+        renderFieldChips();
+      });
+      document.getElementById('propFormula').addEventListener('change', commitHistory);
+      wireVariableInsertButtons('propFormula', (value) => {
+        field.formula = value;
+        renderFieldChips();
+        commitHistory();
+      });
+    }
     wireNumberFormatInputs(field);
   } else {
     document.getElementById('propColumn').addEventListener('change', (e) => {

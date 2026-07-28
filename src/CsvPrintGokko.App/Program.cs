@@ -30,6 +30,7 @@ app.MapCsvEndpoints();
 app.MapPreviewEndpoints();
 app.MapOutputEndpoints();
 app.MapDialogEndpoints();
+app.MapFormulaEndpoints();
 
 // 起動完了後に既定のブラウザでUIを自動的に開く。
 app.Lifetime.ApplicationStarted.Register(() =>

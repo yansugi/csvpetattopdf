@@ -1,6 +1,7 @@
 :root {
   --paper: #eef1ef;
   --paper-raised: #ffffff;
+  --panel-bg: #e3e9e6;
   --ink: #1f2a2e;
   --ink-muted: #5b6b6e;
   --line: #c3cdc9;
@@ -91,6 +92,29 @@ button, select, input {
   font-variant-numeric: tabular-nums;
 }
 
+/* ファイル/フォルダ選択ボタン: 隣接するreadonly入力欄と紛らわしくならないよう、
+   アクセントカラーで塗って明確にクリック可能な要素だと分かるようにする */
+.prop-row-inline, .folder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.prop-row-inline .text-input, .folder-row .text-input {
+  flex: 1;
+  min-width: 0;
+}
+.btn-file-select {
+  flex-shrink: 0;
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.btn-file-select:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
 .error-banner {
   background: var(--danger-soft);
   color: var(--danger);
@@ -172,6 +196,56 @@ button, select, input {
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 
+/* JavaScript式エディタ(Monaco)モーダル: VSCode風のダーク背景で大きめに表示する */
+.js-editor-card {
+  width: min(90vw, 1000px);
+  height: min(80vh, 700px);
+  background: #1e1e1e;
+  color: #d4d4d4;
+}
+.js-editor-card h2 { color: #d4d4d4; }
+.monaco-container {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  overflow: hidden;
+}
+/* モーダルの黒背景に合わせて、変数挿入ボタンもダーク配色にする */
+.js-editor-card .field-label { color: #9d9d9d; }
+.js-editor-card .variable-chip-btn {
+  background: #2d2d2d;
+  border-color: #007acc;
+  color: #4fc1ff;
+}
+.js-editor-card .variable-chip-btn:hover { background: #37373d; }
+.js-editor-run-row { display: flex; align-items: center; gap: 10px; }
+.js-editor-run-row .field-hint { margin-top: 0; color: #9d9d9d; }
+.js-editor-run-row .btn {
+  background: #2d2d2d;
+  border-color: #4a4a4a;
+  color: #d4d4d4;
+}
+.js-editor-run-row .btn:hover { border-color: #007acc; }
+.js-editor-console {
+  margin: 0;
+  height: 110px;
+  overflow-y: auto;
+  background: #0c0c0c;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  padding: 8px 10px;
+  color: #cccccc;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+}
+.js-editor-console.has-error { color: #f48771; }
+.js-editor-console:empty::before {
+  content: "「実行してテスト」を押すと、console.logの出力と評価結果がここに表示されます。";
+  color: #6a6a6a;
+}
+
 /* ===== 配置エディタ ===== */
 .editor-page {
   height: 100vh;
@@ -197,7 +271,8 @@ button, select, input {
 }
 
 .palette {
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--line-strong);
+  background: var(--panel-bg);
   padding: 14px 10px;
   overflow-y: auto;
   display: flex;
@@ -220,6 +295,22 @@ button, select, input {
 .csv-chip.missing { border-color: var(--danger); color: var(--danger); }
 .tool-chip { border-color: var(--marker); color: var(--marker); }
 .palette-section-label { margin-top: 4px; }
+.csv-chip-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* レイアウトに既に配置済みの列は、枠線を実線+差し色にしてひと目で分かるようにする(使えなくなるわけではない)。 */
+.csv-chip.used {
+  border-style: solid;
+  border-color: var(--success);
+  background: #eaf3ec;
+}
+.csv-chip-used-badge {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--success);
+  background: #d9ecdc;
+  border-radius: 3px;
+  padding: 1px 5px;
+}
 
 .canvas-area {
   position: relative;
@@ -344,7 +435,8 @@ button, select, input {
 }
 
 .props-panel {
-  border-left: 1px solid var(--line);
+  border-left: 1px solid var(--line-strong);
+  background: var(--panel-bg);
   padding: 14px;
   overflow-x: hidden;
   overflow-y: auto;
