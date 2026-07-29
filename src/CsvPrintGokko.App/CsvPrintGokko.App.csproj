@@ -18,6 +18,8 @@
     <Product>CSVペタっとPDF</Product>
     <AssemblyTitle>CSVペタっとPDF</AssemblyTitle>
     <ApplicationIcon>app-icon.ico</ApplicationIcon>
+    <!-- 出力されるexeのファイル名(プロジェクト名/名前空間自体は変更しない) -->
+    <AssemblyName>csvpetattopdf</AssemblyName>
   </PropertyGroup>
 
 </Project>
