@@ -17,9 +17,12 @@ public static class OutputEndpoints
                 return Results.NotFound("CSVセッションが見つかりません。CSVを読み込み直してください。");
 
             string pdfPath;
+            TemplateKind kind;
             try
             {
+                var layout = templateStore.GetLayout(request.TemplateId);
                 pdfPath = templateStore.GetPdfPath(request.TemplateId);
+                kind = layout.Kind;
             }
             catch (FileNotFoundException)
             {
@@ -28,10 +31,13 @@ public static class OutputEndpoints
 
             if (string.IsNullOrWhiteSpace(request.OutputFolderPath))
                 return Results.BadRequest("保存先フォルダを指定してください。");
-            if (string.IsNullOrWhiteSpace(request.FilenamePattern))
+            // ファイル名パターンは単票の個別出力(1行=1ファイル)のときのみ使う。結合/一覧表では常に固定のファイル名で1つのPDFを出力する。
+            if (kind == TemplateKind.Single && request.Mode == OutputMode.Individual && string.IsNullOrWhiteSpace(request.FilenamePattern))
                 return Results.BadRequest("ファイル名パターンを指定してください。");
 
-            var jobId = jobRunner.Start(pdfPath, request.Fields, table.Rows, request.Mode, request.FilenamePattern, request.OutputFolderPath);
+            var jobId = jobRunner.Start(
+                pdfPath, request.Fields, table.Rows, kind, request.Mode,
+                request.FilenamePattern, request.OutputFolderPath, request.ListSettings);
             return Results.Ok(new { jobId });
         });
 
@@ -58,7 +64,11 @@ public sealed record OutputStartRequest
     public required Guid TemplateId { get; init; }
     public required IReadOnlyList<FieldDefinition> Fields { get; init; }
     public required Guid CsvSessionId { get; init; }
-    public required OutputMode Mode { get; init; }
-    public required string FilenamePattern { get; init; }
+    /// <summary>TemplateKind.Singleのときのみ使用(結合/個別)。Listでは無視される。</summary>
+    public OutputMode Mode { get; init; } = OutputMode.Combined;
+    /// <summary>TemplateKind.Single かつ Mode=Individual のときのみ必須。</summary>
+    public string FilenamePattern { get; init; } = "";
     public required string OutputFolderPath { get; init; }
+    /// <summary>TemplateKind.Listのときの一覧表示設定。</summary>
+    public ListRenderSettings ListSettings { get; init; } = new();
 }

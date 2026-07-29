@@ -49,6 +49,26 @@ public sealed class FileNamePatternServiceTests
     }
 
     [Fact]
+    public void Resolve_行番号トークンを1始まりの連番に置換する()
+    {
+        var row = new Dictionary<string, string> { ["氏名"] = "山田太郎" };
+
+        string result = _sut.Resolve("{行番号}_{氏名}.pdf", row, rowNumber: 5, outputDateTime: "");
+
+        Assert.Equal("5_山田太郎.pdf", result);
+    }
+
+    [Fact]
+    public void Resolve_出力時間トークンをサニタイズして置換する()
+    {
+        var row = new Dictionary<string, string> { ["氏名"] = "山田太郎" };
+
+        string result = _sut.Resolve("{氏名}_{出力時間}.pdf", row, rowNumber: 1, outputDateTime: "2026/07/28 21:00:00");
+
+        Assert.Equal("山田太郎_2026_07_28 21_00_00.pdf", result);
+    }
+
+    [Fact]
     public void Deduplicate_初回はそのままの名前を返す()
     {
         var used = new HashSet<string>();

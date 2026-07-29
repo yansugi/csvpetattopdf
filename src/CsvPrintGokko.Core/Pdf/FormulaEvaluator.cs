@@ -5,18 +5,20 @@ namespace CsvPrintGokko.Core.Pdf;
 
 /// <summary>
 /// FieldDefinition.Formula(例: "{単価}*{数量}")を評価する。
-/// "{列名}"はrowDataの値、"{行番号}"は1始まりの行番号に置換したうえで、
-/// + - * / ( ) からなる四則演算式として計算する。
+/// "{列名}"はrowDataの値、"{行番号}"は1始まりのCSV行番号、"{ページ番号}"は現在のページ番号、
+/// "{総ページ数}"は出力全体の総ページ数に置換したうえで、+ - * / ( ) からなる四則演算式として計算する。
 /// 参照列が無い・数値でない・0除算・構文エラーなどの場合はTryEvaluateがfalseを返す。
 /// </summary>
 public static partial class FormulaEvaluator
 {
     private const string RowNumberToken = "行番号";
+    private const string PageNumberToken = "ページ番号";
+    private const string TotalPageCountToken = "総ページ数";
 
-    public static bool TryEvaluate(string formula, IReadOnlyDictionary<string, string> rowData, int rowNumber, out double result)
+    public static bool TryEvaluate(string formula, IReadOnlyDictionary<string, string> rowData, int rowNumber, int pageNumber, int totalPageCount, out double result)
     {
         result = 0;
-        string? substituted = SubstituteVariables(formula, rowData, rowNumber);
+        string? substituted = SubstituteVariables(formula, rowData, rowNumber, pageNumber, totalPageCount);
         if (substituted is null)
             return false;
 
@@ -34,8 +36,8 @@ public static partial class FormulaEvaluator
         }
     }
 
-    /// <summary>"{列名}"/"{行番号}"を実際の値に置換する。対応する列が無い場合はnullを返す。</summary>
-    private static string? SubstituteVariables(string formula, IReadOnlyDictionary<string, string> rowData, int rowNumber)
+    /// <summary>"{列名}"/"{行番号}"/"{ページ番号}"/"{総ページ数}"を実際の値に置換する。対応する列が無い場合はnullを返す。</summary>
+    private static string? SubstituteVariables(string formula, IReadOnlyDictionary<string, string> rowData, int rowNumber, int pageNumber, int totalPageCount)
     {
         bool missingColumn = false;
         string replaced = TokenPattern().Replace(formula, match =>
@@ -43,6 +45,10 @@ public static partial class FormulaEvaluator
             string name = match.Groups[1].Value;
             if (name == RowNumberToken)
                 return rowNumber.ToString(CultureInfo.InvariantCulture);
+            if (name == PageNumberToken)
+                return pageNumber.ToString(CultureInfo.InvariantCulture);
+            if (name == TotalPageCountToken)
+                return totalPageCount.ToString(CultureInfo.InvariantCulture);
             if (rowData.TryGetValue(name, out var value))
                 return value;
             missingColumn = true;

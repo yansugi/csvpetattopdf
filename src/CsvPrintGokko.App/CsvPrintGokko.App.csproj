@@ -14,6 +14,10 @@
     <OutputType>WinExe</OutputType>
     <!-- 単一ユーザー向けのローカルツールのため、多コア向けのServer GCではなくメモリ効率重視のWorkstation GCを使う -->
     <ServerGarbageCollection>false</ServerGarbageCollection>
+    <!-- exeのファイル情報(プロパティ)・アイコンに表示されるアプリ名 -->
+    <Product>CSVペタっとPDF</Product>
+    <AssemblyTitle>CSVペタっとPDF</AssemblyTitle>
+    <ApplicationIcon>app-icon.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>

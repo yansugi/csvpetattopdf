@@ -2,7 +2,8 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>配置エディタ - CSV差込印刷ツール</title>
+  <title>配置エディタ - CSVペタっとPDF</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico" />
   <link rel="stylesheet" href="css/site.css" />
 </head>
 <body>
@@ -10,12 +11,18 @@
     <div class="toolbar">
       <a href="index.html" class="btn">← ホーム</a>
       <span class="template-name" id="templateNameLabel"></span>
+      <button id="renameTemplateButton" class="btn" type="button" title="プロジェクト名を変更">✏️</button>
+      <a href="#" id="exportProjectLink" class="btn" title="レイアウト・PDF・CSVをまとめて書き出す">📦 エクスポート</a>
       <button id="loadCsvButton" class="btn">CSV読込</button>
+      <button id="replacePdfButton" class="btn" type="button" title="背景のPDFを差し替える">📄 PDF差し替え</button>
+      <input type="file" id="replacePdfFileInput" accept="application/pdf" class="hidden" />
       <button id="saveLayoutButton" class="btn">レイアウト保存</button>
+      <button id="saveAsButton" class="btn" type="button" title="現在の内容を新しいプロジェクトとして保存">名前を付けて保存</button>
       <button id="undoButton" class="btn" type="button" disabled title="元に戻す (Ctrl+Z)">↶</button>
       <button id="redoButton" class="btn" type="button" disabled title="やり直す (Ctrl+Y)">↷</button>
       <button id="panToolButton" class="btn" type="button" title="手のひらツール">✋ 手のひら</button>
       <button id="togglePreviewButton" class="btn" disabled>プレビュー切替</button>
+      <button id="listSettingsButton" class="btn hidden" type="button">一覧表の設定</button>
       <div class="spacer"></div>
       <button id="goToOutputButton" class="btn btn-primary">出力へ</button>
     </div>
@@ -87,6 +94,32 @@
     </div>
   </div>
 
+  <div id="listSettingsModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <h2>一覧表の設定</h2>
+      <div class="field-hint">キャンバス上の青い枠は直接ドラッグで移動・下端をドラッグでリサイズできます。ここでは数値を入力して微調整できます。</div>
+      <div class="prop-row">
+        <span class="field-label">枠の上からの位置 (pt)</span>
+        <input type="number" step="0.1" class="text-input mono-input" id="listRowOriginYInput" />
+      </div>
+      <div class="prop-row">
+        <span class="field-label">枠のサイズ・高さ (pt)</span>
+        <input type="number" step="0.1" min="4" class="text-input mono-input" id="listRowHeightInput" />
+      </div>
+      <div class="prop-row">
+        <span class="field-label">データの繰り返し(1ページあたりの行数)</span>
+        <input type="number" step="1" min="1" class="text-input mono-input" id="listRepeatCountInput" />
+        <div class="field-hint">1ページに描画する行数です。CSVがこれを超える場合は2ページ目以降に自動的に続きを出力します。配置エディタ上のプレビュー行数にもそのまま使われます。</div>
+      </div>
+      <div class="prop-row">
+        <label><input type="checkbox" id="listFrameLockedCheckbox" /> 🔒 位置とサイズをロック(枠のドラッグ・リサイズを禁止)</label>
+      </div>
+      <div class="modal-actions">
+        <button id="listSettingsCloseButton" class="btn btn-primary">閉じる</button>
+      </div>
+    </div>
+  </div>
+
   <div id="jsEditorModal" class="modal-backdrop hidden">
     <div class="modal-card js-editor-card">
       <h2>JavaScript式エディタ</h2>
@@ -107,6 +140,7 @@
   <div id="error" class="error-banner hidden" style="position:fixed; bottom:60px; left:50%; transform:translateX(-50%); z-index:100;"></div>
 
   <script src="lib/monaco-editor/vs/loader.js"></script>
+  <script type="module" src="js/heartbeat.js"></script>
   <script type="module" src="js/editor.js"></script>
 </body>
 </html>

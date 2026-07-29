@@ -1,3 +1,4 @@
+using System.Globalization;
 using CsvPrintGokko.Core.Csv;
 using CsvPrintGokko.Core.Pdf;
 using Microsoft.Extensions.Caching.Memory;
@@ -13,6 +14,7 @@ public static class FormulaEndpoints
         {
             IReadOnlyDictionary<string, string> rowData = new Dictionary<string, string>();
             int rowNumber = 1;
+            int totalPageCount = 1;
 
             // CSVが読み込まれていればそのCSVの指定行データで、無ければ空データ(row未定義相当)でテストする。
             if (request.CsvSessionId is { } sessionId)
@@ -26,9 +28,12 @@ public static class FormulaEndpoints
 
                 rowData = table.Rows[rowIndex];
                 rowNumber = rowIndex + 1;
+                totalPageCount = table.Rows.Count;
             }
 
-            var result = JsFormulaEvaluator.Evaluate(request.Script, rowData, rowNumber);
+            // テスト実行では単票・結合出力を想定し、ページ番号は行番号と同じ値、出力時間は現在時刻でテストする。
+            string outputDateTime = DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture);
+            var result = JsFormulaEvaluator.Evaluate(request.Script, rowData, rowNumber, pageNumber: rowNumber, totalPageCount, outputDateTime);
             return Results.Ok(new
             {
                 success = result.Success,

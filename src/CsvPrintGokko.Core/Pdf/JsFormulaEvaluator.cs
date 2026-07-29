@@ -6,7 +6,8 @@ namespace CsvPrintGokko.Core.Pdf;
 /// <summary>
 /// FieldDefinition.JavaScriptFormula(例: "Number(row[\"単価\"]) * Number(row[\"数量\"])")を
 /// Jint(.NET製の軽量JavaScriptエンジン)で評価する。
-/// rowにはCSVの値(列名→文字列)、rowNumberには1始まりの行番号を渡す。
+/// rowにはCSVの値(列名→文字列)、rowNumberには1始まりのCSV行番号、pageNumberには現在のページ番号、
+/// totalPagesには出力全体の総ページ数、outputDateTimeには出力実行時刻(文字列)を渡す。
 /// 無限ループ等で描画がフリーズしないよう、実行時間に短いタイムアウトを設ける。
 /// </summary>
 public static class JsFormulaEvaluator
@@ -14,9 +15,9 @@ public static class JsFormulaEvaluator
     private static readonly TimeSpan ExecutionTimeout = TimeSpan.FromMilliseconds(500);
 
     /// <summary>スクリプトを評価する。成功時はresultに評価結果(数値かどうかと表示用文字列)を返す。PDF描画時に使う。</summary>
-    public static bool TryEvaluate(string script, IReadOnlyDictionary<string, string> rowData, int rowNumber, out JsFormulaResult result)
+    public static bool TryEvaluate(string script, IReadOnlyDictionary<string, string> rowData, int rowNumber, int pageNumber, int totalPageCount, string outputDateTime, out JsFormulaResult result)
     {
-        var debugResult = Evaluate(script, rowData, rowNumber);
+        var debugResult = Evaluate(script, rowData, rowNumber, pageNumber, totalPageCount, outputDateTime);
         result = new JsFormulaResult(debugResult.IsNumber, debugResult.NumberValue, debugResult.DisplayText);
         return debugResult.Success;
     }
@@ -25,7 +26,7 @@ public static class JsFormulaEvaluator
     /// スクリプトを評価し、console.log等の出力内容とエラーメッセージも含めて返す。
     /// エディタの「実行してテスト」(デバッグ実行)から使う。
     /// </summary>
-    public static JsFormulaDebugResult Evaluate(string script, IReadOnlyDictionary<string, string> rowData, int rowNumber)
+    public static JsFormulaDebugResult Evaluate(string script, IReadOnlyDictionary<string, string> rowData, int rowNumber, int pageNumber, int totalPageCount, string outputDateTime)
     {
         var consoleLines = new List<string>();
 
@@ -43,6 +44,9 @@ public static class JsFormulaEvaluator
             string rowJson = JsonSerializer.Serialize(rowData);
             engine.Execute($"var row = {rowJson};");
             engine.SetValue("rowNumber", rowNumber);
+            engine.SetValue("pageNumber", pageNumber);
+            engine.SetValue("totalPages", totalPageCount);
+            engine.SetValue("outputDateTime", outputDateTime);
             SetupConsole(engine, consoleLines);
 
             var value = engine.Evaluate(script);

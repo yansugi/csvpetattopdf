@@ -15,6 +15,13 @@ public enum FieldKind
     Calc
 }
 
+/// <summary>テンプレートの種類。SingleはCSV1行につき1ページの差込印刷、Listは全行を一覧表示する一覧表。</summary>
+public enum TemplateKind
+{
+    Single,
+    List
+}
+
 /// <summary>フィールドのテキスト配置(左揃え/中央揃え/右揃え)。</summary>
 public enum TextAlign
 {
@@ -40,7 +47,7 @@ public enum OverflowBehavior
     Clip
 }
 
-/// <summary>PDF出力モード(結合/個別)。</summary>
+/// <summary>PDF出力モード(結合/個別)。TemplateKind.Singleのときのみ意味を持つ(Listは常に一覧表として1つのPDFに出力される)。</summary>
 public enum OutputMode
 {
     Combined,

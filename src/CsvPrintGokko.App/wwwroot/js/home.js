@@ -1,10 +1,12 @@
-import { listTemplates, createTemplate } from './api-client.js';
+import { listTemplates, createTemplate, deleteTemplate, importProject } from './api-client.js';
 
 const errorEl = document.getElementById('error');
 const listEl = document.getElementById('templateList');
 const emptyHintEl = document.getElementById('emptyHint');
 const createButton = document.getElementById('createButton');
 const pdfFileInput = document.getElementById('pdfFileInput');
+const importButton = document.getElementById('importButton');
+const importFileInput = document.getElementById('importFileInput');
 const nameModal = document.getElementById('nameModal');
 const templateNameInput = document.getElementById('templateNameInput');
 const nameCancelButton = document.getElementById('nameCancelButton');
@@ -42,12 +44,17 @@ async function loadTemplateList() {
     }
     emptyHintEl.classList.add('hidden');
     for (const t of templates) {
+      const isList = t.kind === 'list';
       const row = document.createElement('div');
       row.className = 'home-row';
       row.innerHTML = `
-        <span class="fname">${escapeHtml(t.templateName)}</span>
+        <span class="fname-wrap">
+          <span class="fname">${escapeHtml(t.templateName)}</span>
+          <span class="kind-badge ${isList ? 'kind-list' : 'kind-single'}">${isList ? '一覧表' : '単票'}</span>
+        </span>
         <span class="fdate">${formatDate(t.updatedAtUtc)} 更新</span>
         <a class="btn" href="editor.html?templateId=${encodeURIComponent(t.templateId)}">開く</a>
+        <button class="btn btn-danger" type="button" data-delete-id="${t.templateId}" data-delete-name="${escapeHtml(t.templateName)}">削除</button>
       `;
       listEl.appendChild(row);
     }
@@ -56,10 +63,53 @@ async function loadTemplateList() {
   }
 }
 
+// 削除ボタンは一覧を再描画するたびに行ごと作り直されるため、リスト全体への
+// イベント委譲で拾う(個別の行に都度リスナーを付け外しする必要をなくすため)。
+listEl.addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-delete-id]');
+  if (!button) return;
+
+  const templateId = button.dataset.deleteId;
+  const templateName = button.dataset.deleteName;
+  if (!window.confirm(`テンプレート「${templateName}」を削除します。この操作は元に戻せません。よろしいですか?`)) {
+    return;
+  }
+
+  clearError();
+  button.disabled = true;
+  try {
+    await deleteTemplate(templateId);
+    await loadTemplateList();
+  } catch (err) {
+    showError(`テンプレートの削除に失敗しました: ${err.message}`);
+    button.disabled = false;
+  }
+});
+
 createButton.addEventListener('click', () => {
   clearError();
   pdfFileInput.value = '';
   pdfFileInput.click();
+});
+
+importButton.addEventListener('click', () => {
+  clearError();
+  importFileInput.value = '';
+  importFileInput.click();
+});
+
+importFileInput.addEventListener('change', async () => {
+  if (importFileInput.files.length === 0) return;
+  const file = importFileInput.files[0];
+
+  importButton.disabled = true;
+  try {
+    const layout = await importProject(file);
+    window.location.href = `editor.html?templateId=${encodeURIComponent(layout.templateId)}`;
+  } catch (err) {
+    showError(`プロジェクトファイルの読み込みに失敗しました: ${err.message}`);
+    importButton.disabled = false;
+  }
 });
 
 pdfFileInput.addEventListener('change', () => {
@@ -75,6 +125,17 @@ nameCancelButton.addEventListener('click', () => {
   pendingPdfFile = null;
 });
 
+const kindSingleLabel = document.getElementById('kindSingleLabel');
+const kindListLabel = document.getElementById('kindListLabel');
+function updateKindHighlight() {
+  const kind = document.querySelector('input[name="kind"]:checked').value;
+  kindSingleLabel.classList.toggle('is-active', kind === 'single');
+  kindListLabel.classList.toggle('is-active', kind === 'list');
+}
+kindSingleLabel.addEventListener('click', () => setTimeout(updateKindHighlight));
+kindListLabel.addEventListener('click', () => setTimeout(updateKindHighlight));
+updateKindHighlight();
+
 nameConfirmButton.addEventListener('click', async () => {
   const name = templateNameInput.value.trim();
   if (!name) {
@@ -82,10 +143,11 @@ nameConfirmButton.addEventListener('click', async () => {
     return;
   }
   if (!pendingPdfFile) return;
+  const kind = document.querySelector('input[name="kind"]:checked').value;
 
   nameConfirmButton.disabled = true;
   try {
-    const layout = await createTemplate(name, pendingPdfFile);
+    const layout = await createTemplate(name, pendingPdfFile, kind);
     window.location.href = `editor.html?templateId=${encodeURIComponent(layout.templateId)}`;
   } catch (err) {
     showError(`テンプレートの作成に失敗しました: ${err.message}`);

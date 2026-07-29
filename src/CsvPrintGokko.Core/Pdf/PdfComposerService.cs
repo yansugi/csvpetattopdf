@@ -24,19 +24,23 @@ public sealed class PdfComposerService
 
     /// <summary>
     /// テンプレートPDF(1ページ目のみ使用)にfieldsの配置に従いrowDataの値を描画したPdfDocumentを返す。
-    /// 呼び出し側でSaveやストリーム書き出しと破棄(Dispose)を行うこと。
+    /// pageNumberは"{ページ番号}"、totalPageCountは"{総ページ数}"、outputDateTimeは"{出力時間}"の置換に使う
+    /// (既定は数値がどちらも1、出力時間は空文字)。呼び出し側でSaveやストリーム書き出しと破棄(Dispose)を行うこと。
     /// </summary>
     public PdfDocument ComposeSinglePage(
         string templatePath,
         IReadOnlyList<FieldDefinition> fields,
         IReadOnlyDictionary<string, string> rowData,
-        int rowNumber = 1)
+        int rowNumber = 1,
+        int pageNumber = 1,
+        int totalPageCount = 1,
+        string outputDateTime = "")
     {
         var document = PdfReader.Open(templatePath, PdfDocumentOpenMode.Modify);
         if (document.PageCount == 0)
             throw new InvalidDataException("テンプレートPDFにページが含まれていません。");
 
-        DrawFields(document.Pages[0], fields, rowData, rowNumber);
+        DrawFields(document.Pages[0], fields, rowData, rowNumber, pageNumber, totalPageCount, outputDateTime);
         return document;
     }
 
@@ -49,50 +53,115 @@ public sealed class PdfComposerService
         string templatePath,
         IReadOnlyList<FieldDefinition> fields,
         IReadOnlyDictionary<string, string> rowData,
-        int rowNumber = 1)
+        int rowNumber = 1,
+        int pageNumber = 1,
+        int totalPageCount = 1,
+        string outputDateTime = "")
     {
         using var templateDocument = PdfReader.Open(templatePath, PdfDocumentOpenMode.Import);
         if (templateDocument.PageCount == 0)
             throw new InvalidDataException("テンプレートPDFにページが含まれていません。");
 
         var importedPage = targetDocument.AddPage(templateDocument.Pages[0]);
-        DrawFields(importedPage, fields, rowData, rowNumber);
+        DrawFields(importedPage, fields, rowData, rowNumber, pageNumber, totalPageCount, outputDateTime);
     }
 
-    private static void DrawFields(PdfPage page, IReadOnlyList<FieldDefinition> fields, IReadOnlyDictionary<string, string> rowData, int rowNumber)
+    /// <summary>
+    /// 一覧表出力(TemplateKind.List)用に、「繰り返し行の枠」(listSettings.RowOriginY〜+RowHeightPtの
+    /// Y座標帯)にY座標を持つフィールドをCSVの各行につき1回(Yをずらしながら)描画し、targetDocumentへ
+    /// 連続したページとして追加する。枠外のフィールドは各ページに1回だけ固定描画される(「現在の行」という
+    /// 概念が無いため、{行番号}は意味を持たない。ページ番号を表示するには{ページ番号}を使う)。
+    /// 1ページにはlistSettings.RepeatCount行までを描画し、それを超える行は自動的に次ページへ送って
+    /// 各ページの先頭に固定フィールドを再描画する。outputDateTimeは"{出力時間}"の置換に使う(全ページ共通の値)。
+    /// </summary>
+    public void ComposeListPages(
+        PdfDocument targetDocument,
+        string templatePath,
+        IReadOnlyList<FieldDefinition> fields,
+        IReadOnlyList<IReadOnlyDictionary<string, string>> rows,
+        ListRenderSettings listSettings,
+        Action<int>? onPageProcessed = null,
+        string outputDateTime = "")
+    {
+        double rowOriginY = listSettings.RowOriginY;
+        double rowFrameBottom = rowOriginY + listSettings.RowHeightPt;
+        var repeatingFields = fields.Where(f => f.Y >= rowOriginY && f.Y < rowFrameBottom).ToList();
+        if (repeatingFields.Count == 0)
+            throw new InvalidOperationException("一覧表として出力するには、繰り返し行の枠内にフィールドを1つ以上配置してください。");
+        var staticFields = fields.Where(f => f.Y < rowOriginY || f.Y >= rowFrameBottom).ToList();
+
+        using var templateDocument = PdfReader.Open(templatePath, PdfDocumentOpenMode.Import);
+        if (templateDocument.PageCount == 0)
+            throw new InvalidDataException("テンプレートPDFにページが含まれていません。");
+
+        int rowsPerPage = Math.Max(1, listSettings.RepeatCount);
+        int totalPages = TablePagination.CalculateTotalPages(rows.Count, rowsPerPage);
+
+        int processedRows = 0;
+        var emptyRow = new Dictionary<string, string>();
+        for (int pageIndex = 0; pageIndex < totalPages; pageIndex++)
+        {
+            var importedPage = targetDocument.AddPage(templateDocument.Pages[0]);
+            using var gfx = XGraphics.FromPdfPage(importedPage);
+            int pageNumber = pageIndex + 1;
+
+            // 枠外の固定フィールドには「現在の行」という概念が無いため、行番号は0(該当なし)として渡す。
+            foreach (var field in staticFields)
+                DrawSingleField(gfx, importedPage, field, emptyRow, rowNumber: 0, pageNumber, totalPages, outputDateTime);
+
+            var pageRows = rows.Skip(pageIndex * rowsPerPage).Take(rowsPerPage).ToList();
+            for (int r = 0; r < pageRows.Count; r++)
+            {
+                int globalRowIndex = pageIndex * rowsPerPage + r;
+                double offsetY = r * listSettings.RowHeightPt;
+
+                foreach (var field in repeatingFields)
+                    DrawSingleField(gfx, importedPage, field with { Y = field.Y + offsetY }, pageRows[r], globalRowIndex + 1, pageNumber, totalPages, outputDateTime);
+            }
+
+            processedRows += pageRows.Count;
+            onPageProcessed?.Invoke(processedRows);
+        }
+    }
+
+    private static void DrawFields(PdfPage page, IReadOnlyList<FieldDefinition> fields, IReadOnlyDictionary<string, string> rowData, int rowNumber, int pageNumber, int totalPageCount, string outputDateTime)
     {
         using var gfx = XGraphics.FromPdfPage(page);
         foreach (var field in fields)
+            DrawSingleField(gfx, page, field, rowData, rowNumber, pageNumber, totalPageCount, outputDateTime);
+    }
+
+    /// <summary>1フィールド分を、指定した行データ・行番号・ページ番号・総ページ数・出力時間で描画する。単票の通常描画・一覧表の繰り返し行のどちらからも使う共通ロジック。</summary>
+    private static void DrawSingleField(XGraphics gfx, PdfPage page, FieldDefinition field, IReadOnlyDictionary<string, string> rowData, int rowNumber, int pageNumber, int totalPageCount, string outputDateTime)
+    {
+        if (field.Kind == FieldKind.Text)
         {
-            if (field.Kind == FieldKind.Text)
+            // 固定テキストでも"{列名}"はCSVの実データに置換してから描画する(それ以外の部分は行に依らず固定)。
+            string resolvedText = TextVariableResolver.Resolve(field.StaticText ?? string.Empty, rowData, rowNumber, pageNumber, totalPageCount, outputDateTime);
+            DrawField(gfx, page, field, resolvedText);
+        }
+        else if (field.Kind == FieldKind.Calc)
+        {
+            // 計算式の評価に失敗した場合(参照列が無い/0除算/構文エラー/JS実行エラー等)は#ERRORとして可視化する。
+            string calcText;
+            if (field.UseJavaScriptFormula)
             {
-                // 固定テキストでも"{列名}"はCSVの実データに置換してから描画する(それ以外の部分は行に依らず固定)。
-                string resolvedText = TextVariableResolver.Resolve(field.StaticText ?? string.Empty, rowData, rowNumber);
-                DrawField(gfx, page, field, resolvedText);
+                calcText = JsFormulaEvaluator.TryEvaluate(field.JavaScriptFormula ?? string.Empty, rowData, rowNumber, pageNumber, totalPageCount, outputDateTime, out var jsResult)
+                    ? (jsResult.IsNumber ? CsvValueFormatter.FormatNumberValue(field, jsResult.NumberValue) : jsResult.DisplayText)
+                    : "#ERROR";
             }
-            else if (field.Kind == FieldKind.Calc)
+            else
             {
-                // 計算式の評価に失敗した場合(参照列が無い/0除算/構文エラー/JS実行エラー等)は#ERRORとして可視化する。
-                string calcText;
-                if (field.UseJavaScriptFormula)
-                {
-                    calcText = JsFormulaEvaluator.TryEvaluate(field.JavaScriptFormula ?? string.Empty, rowData, rowNumber, out var jsResult)
-                        ? (jsResult.IsNumber ? CsvValueFormatter.FormatNumberValue(field, jsResult.NumberValue) : jsResult.DisplayText)
-                        : "#ERROR";
-                }
-                else
-                {
-                    calcText = FormulaEvaluator.TryEvaluate(field.Formula ?? string.Empty, rowData, rowNumber, out double calcResult)
-                        ? CsvValueFormatter.FormatNumberValue(field, calcResult)
-                        : "#ERROR";
-                }
-                DrawField(gfx, page, field, calcText);
+                calcText = FormulaEvaluator.TryEvaluate(field.Formula ?? string.Empty, rowData, rowNumber, pageNumber, totalPageCount, out double calcResult)
+                    ? CsvValueFormatter.FormatNumberValue(field, calcResult)
+                    : "#ERROR";
             }
-            // CSVに対応する列が無い場合は描画をスキップする(列マッピングの不整合はPhase 4のUIで警告する想定)。
-            else if (field.CsvColumn is not null && rowData.TryGetValue(field.CsvColumn, out var text) && text is not null)
-            {
-                DrawField(gfx, page, field, CsvValueFormatter.Format(field, text));
-            }
+            DrawField(gfx, page, field, calcText);
+        }
+        // CSVに対応する列が無い場合は描画をスキップする(列マッピングの不整合はPhase 4のUIで警告する想定)。
+        else if (field.CsvColumn is not null && rowData.TryGetValue(field.CsvColumn, out var text) && text is not null)
+        {
+            DrawField(gfx, page, field, CsvValueFormatter.Format(field, text));
         }
     }
 

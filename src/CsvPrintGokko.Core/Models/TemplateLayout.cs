@@ -15,4 +15,10 @@ public sealed record TemplateLayout
     public required CsvSettings CsvSettings { get; init; }
     public IReadOnlyList<FieldDefinition> Fields { get; init; } = Array.Empty<FieldDefinition>();
     public required OutputSettings OutputSettings { get; init; }
+
+    /// <summary>テンプレートの種類。Single(差込印刷、CSV1行=1ページ)/List(一覧表示、全行を1つの一覧表にまとめる)。</summary>
+    public TemplateKind Kind { get; init; } = TemplateKind.Single;
+
+    /// <summary>Kind=Listのときの一覧表示設定(行の高さ・ゼブラ縞など)。Kind=Singleでは未使用。</summary>
+    public ListRenderSettings ListSettings { get; init; } = new();
 }

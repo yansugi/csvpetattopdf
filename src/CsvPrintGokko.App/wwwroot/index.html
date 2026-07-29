@@ -2,18 +2,26 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>CSV差込印刷ツール</title>
+  <title>CSVペタっとPDF</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico" />
   <link rel="stylesheet" href="css/site.css" />
 </head>
 <body>
   <div class="home-page">
-    <h1>CSV差込印刷ツール</h1>
+    <h1>CSVペタっとPDF</h1>
     <div id="error" class="error-banner hidden"></div>
 
-    <button id="createButton" class="btn btn-primary home-cta">
-      ＋ 新規プロジェクトを作成(PDFテンプレートを選択)
-    </button>
+    <div class="home-cta-row">
+      <button id="createButton" class="btn btn-primary home-cta">
+        ＋ 新規プロジェクトを作成(PDFテンプレートを選択)
+      </button>
+      <button id="importButton" class="btn home-cta" type="button">
+        📂 プロジェクトファイルを読み込む
+      </button>
+    </div>
     <input type="file" id="pdfFileInput" accept="application/pdf" class="hidden" />
+    <input type="file" id="importFileInput" accept=".cpgproj" class="hidden" />
+    <div class="field-hint">「エクスポート」で書き出した.cpgprojファイルを別のPCに移動し、「プロジェクトファイルを読み込む」で読み込むと、レイアウト・テンプレートPDF・CSVをまとめて引き継げます。</div>
 
     <div>
       <div class="home-list-title">最近使用したテンプレート</div>
@@ -26,6 +34,17 @@
     <div class="modal-card">
       <h2>テンプレート名を入力</h2>
       <input type="text" id="templateNameInput" class="text-input" placeholder="例: 請求書テンプレート" />
+      <div class="field-label">テンプレートの種類</div>
+      <div class="radio-row">
+        <label class="radio-opt" id="kindSingleLabel">
+          <span class="opt-title"><input type="radio" name="kind" value="single" id="kindSingle" checked /> 単票(差込印刷)</span>
+          <span class="opt-desc">CSV1行につき1ページを生成(申請書・請求書など)</span>
+        </label>
+        <label class="radio-opt" id="kindListLabel">
+          <span class="opt-title"><input type="radio" name="kind" value="list" id="kindList" /> 一覧表</span>
+          <span class="opt-desc">CSV全行を1つの一覧表にまとめて出力</span>
+        </label>
+      </div>
       <div class="modal-actions">
         <button id="nameCancelButton" class="btn">キャンセル</button>
         <button id="nameConfirmButton" class="btn btn-primary">作成</button>
@@ -33,6 +52,7 @@
     </div>
   </div>
 
+  <script type="module" src="js/heartbeat.js"></script>
   <script type="module" src="js/home.js"></script>
 </body>
 </html>

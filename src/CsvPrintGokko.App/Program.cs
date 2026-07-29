@@ -16,6 +16,8 @@ builder.WebHost.UseUrls(BaseUrl);
 builder.Services.AddSingleton<TemplateStore>();
 builder.Services.AddSingleton<OutputJobRunner>();
 builder.Services.AddSingleton<StaFolderDialogService>();
+builder.Services.AddSingleton<HeartbeatTracker>();
+builder.Services.AddHostedService<HeartbeatWatchdogService>();
 builder.Services.AddMemoryCache();
 // layout.jsonのファイル保存と同じenum表現(小文字文字列)をAPIレスポンスにも適用する。
 builder.Services.ConfigureHttpJsonOptions(options => JsonDefaults.Apply(options.SerializerOptions));
@@ -31,6 +33,7 @@ app.MapPreviewEndpoints();
 app.MapOutputEndpoints();
 app.MapDialogEndpoints();
 app.MapFormulaEndpoints();
+app.MapHeartbeatEndpoints();
 
 // 起動完了後に既定のブラウザでUIを自動的に開く。
 app.Lifetime.ApplicationStarted.Register(() =>

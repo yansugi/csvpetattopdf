@@ -136,6 +136,7 @@ button, select, input {
   gap: 24px;
 }
 
+.home-cta-row { display: flex; gap: 12px; }
 .home-cta {
   height: 60px;
   display: flex;
@@ -143,6 +144,7 @@ button, select, input {
   justify-content: center;
   gap: 8px;
   font-size: 15px;
+  flex: 1;
 }
 
 .home-list-title {
@@ -157,7 +159,7 @@ button, select, input {
 
 .home-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
@@ -165,6 +167,7 @@ button, select, input {
   border-radius: 6px;
   background: var(--paper-raised);
 }
+.home-row .fname-wrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .home-row .fname { font-weight: 600; }
 .home-row .fdate {
   color: var(--ink-muted);
@@ -172,6 +175,17 @@ button, select, input {
   font-variant-numeric: tabular-nums;
   font-size: 12.5px;
 }
+
+.kind-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.kind-badge.kind-single { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.kind-badge.kind-list { color: var(--marker); background: var(--marker-soft); border-color: var(--marker); }
 
 .empty-hint { color: var(--ink-muted); font-size: 13px; padding: 12px 0; }
 
@@ -195,6 +209,18 @@ button, select, input {
   gap: 14px;
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+/* テンプレート種類選択(ホーム画面)・出力モード選択(出力設定画面)で共用するラジオカード */
+.radio-row { display: flex; gap: 12px; }
+.radio-opt {
+  flex: 1; padding: 14px; border: 1.5px solid var(--line-strong); border-radius: 5px;
+  display: flex; flex-direction: column; gap: 4px; cursor: pointer; background: var(--paper-raised);
+}
+.radio-opt.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.radio-opt.disabled { cursor: not-allowed; opacity: 0.5; }
+.radio-opt .opt-title { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13.5px; }
+.radio-opt .opt-desc { color: var(--ink-muted); font-size: 12px; }
+.modal-card .radio-row { margin-top: 4px; }
 
 /* JavaScript式エディタ(Monaco)モーダル: VSCode風のダーク背景で大きめに表示する */
 .js-editor-card {
@@ -255,9 +281,11 @@ button, select, input {
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 0 14px;
+  row-gap: 6px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--line);
   background: var(--paper-raised);
 }
@@ -464,6 +492,91 @@ textarea.text-input { resize: vertical; font-family: inherit; min-height: 60px; 
 }
 .variable-chip-btn:hover { opacity: 0.8; }
 .props-empty { color: var(--ink-muted); font-size: 13px; }
+
+/* 一覧表テンプレートの「繰り返し行」フィールド: 通常のフィールドと区別できるよう枠線を緑系にする */
+.field-chip.repeating { border-color: var(--success); }
+.field-chip.repeating.selected { border-color: var(--success); box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 35%, transparent); }
+
+/* 一覧表テンプレートの「繰り返し行の枠」(1行目)。この枠内に置いたフィールドが自動的に繰り返し対象になる。
+   本体をドラッグで移動、下端のハンドルをドラッグでリサイズできる(「一覧表の設定」を開かずに調整可能)。
+   locked時はドラッグ・リサイズを禁止し、カーソルも通常表示に戻す。 */
+.repeat-frame-row {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  cursor: move;
+}
+.repeat-frame-row.locked {
+  cursor: default;
+}
+.repeat-frame-resize-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 8px;
+  cursor: ns-resize;
+}
+/* 1行目(編集行)の番号ラベル。グレーのプレビュー行のラベルと違う配色(アクセントカラー)にすることで、
+   薄いグレーのプレビュー行と紛らわしくならないようにする。 */
+.repeat-frame-label {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 一覧表テンプレートの繰り返しプレビュー(2行目以降)。実PDF出力には含まれない、配置編集専用のガイド表示。
+   編集する場所ではないことが一目でわかるよう、グレーの網掛けにする(1行目の青枠とは明確に区別する)。 */
+.repeat-ghost-row {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: color-mix(in srgb, black 6%, transparent);
+  pointer-events: none;
+}
+.repeat-ghost-row.zebra {
+  background: color-mix(in srgb, black 12%, transparent);
+}
+.repeat-ghost-label {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+  color: #fff;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* プロパティパネル: フィールドが繰り返し行の枠内/枠外のどちらかを示す読み取り専用バッジ */
+.repeat-status-badge {
+  display: inline-block;
+  font-size: 12.5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.repeat-status-badge.repeat-status-in-frame { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); border-color: var(--success); }
+.repeat-status-badge.repeat-status-out-frame { color: var(--ink-muted); background: var(--panel-bg); border-color: var(--line); }
 
 .rowbar {
   display: flex;

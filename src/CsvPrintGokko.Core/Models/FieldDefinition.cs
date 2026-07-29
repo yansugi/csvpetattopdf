@@ -14,7 +14,8 @@ public sealed record FieldDefinition
 
     /// <summary>
     /// Kind=Calcのときに評価する計算式(例: "{単価}*{数量}")。
-    /// "{列名}"でCSVの値、"{行番号}"で1始まりの行番号を参照でき、+ - * / ( ) の四則演算が使える。
+    /// "{列名}"でCSVの値、"{行番号}"で1始まりのCSV行番号、"{ページ番号}"で現在のページ番号、
+    /// "{総ページ数}"で総ページ数を参照でき、+ - * / ( ) の四則演算が使える。
     /// UseJavaScriptFormula=trueのときは使用しない。
     /// </summary>
     public string? Formula { get; init; }
@@ -24,7 +25,8 @@ public sealed record FieldDefinition
 
     /// <summary>
     /// UseJavaScriptFormula=trueのときに評価するJavaScript式(例: "Number(row[\"単価\"]) * Number(row[\"数量\"])")。
-    /// row[列名]でCSVの値(文字列)、rowNumberで1始まりの行番号を参照できる。
+    /// row[列名]でCSVの値(文字列)、rowNumberで1始まりのCSV行番号、pageNumberで現在のページ番号、
+    /// totalPagesで総ページ数を参照できる。
     /// </summary>
     public string? JavaScriptFormula { get; init; }
 

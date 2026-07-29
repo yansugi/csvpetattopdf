@@ -123,6 +123,18 @@ public static class CsvEndpoints
 
             return Results.Ok(table.Rows[index]);
         });
+
+        // 出力設定画面のファイル名パターン変数ボタン用: CSVの列名一覧だけを取得する。
+        // 配置エディタからsessionStorage経由で渡す方式だと、タブの再読込タイミング次第で
+        // 情報が古いまま(または欠落したまま)になり得るため、csvSessionIdから都度サーバーへ問い合わせて
+        // 常に最新の列名一覧を取得できるようにする。
+        group.MapGet("/{sessionId:guid}/headers", (Guid sessionId, IMemoryCache cache) =>
+        {
+            if (!cache.TryGetValue(sessionId, out CsvTable? table) || table is null)
+                return Results.NotFound("CSVセッションが見つかりません。CSVを読み込み直してください。");
+
+            return Results.Ok(new { headers = table.Headers });
+        });
     }
 }
 

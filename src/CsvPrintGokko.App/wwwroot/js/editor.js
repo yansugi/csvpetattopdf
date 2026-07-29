@@ -1,4 +1,4 @@
-import { getTemplate, saveLayout, templatePdfUrl, browseCsvFile, loadCsvFromPath, renderPreview, testJsFormula } from './api-client.js';
+import { getTemplate, saveLayout, templatePdfUrl, browseCsvFile, loadCsvFromPath, renderPreview, renderListPreview, testJsFormula, exportProjectUrl, replaceTemplatePdf, saveAsTemplate } from './api-client.js';
 import { renderPdfToCanvas, pxToPt, ptToPx } from './pdf-canvas.js';
 
 // Windows環境に標準で入っていることが多いフォントの固定リスト(動的列挙は初回取得が重いため採用しない)。
@@ -29,11 +29,17 @@ function roundTo2(value) {
   return Math.round(value * 100) / 100;
 }
 
+/// <summary>一覧表の繰り返し行の枠(位置・高さ)は小数点第1位までに丸める。</summary>
+function roundTo1(value) {
+  return Math.round(value * 10) / 10;
+}
+
 const params = new URLSearchParams(window.location.search);
 const templateId = params.get('templateId');
 if (!templateId) {
   window.location.href = 'index.html';
 }
+document.getElementById('exportProjectLink').href = exportProjectUrl(templateId);
 
 // --- 状態 ---
 let layout = null;           // サーバーから取得したTemplateLayout。fieldsを直接編集する。
@@ -48,16 +54,21 @@ let isPanMode = false;
 let selectedCsvPath = null;
 let history = [];
 let historyIndex = -1;
+let isListKind = false; // layout.kind === 'list'(一覧表テンプレート)かどうか。読み込み後に確定する。
 
 // --- DOM参照 ---
 const templateNameLabel = document.getElementById('templateNameLabel');
+const renameTemplateButton = document.getElementById('renameTemplateButton');
 const paletteEl = document.getElementById('palette');
 const paletteEmptyHint = document.getElementById('paletteEmptyHint');
 const pdfStage = document.getElementById('pdfStage');
 const pdfCanvas = document.getElementById('pdfCanvas');
 const propsPanel = document.getElementById('propsPanel');
 const loadCsvButton = document.getElementById('loadCsvButton');
+const replacePdfButton = document.getElementById('replacePdfButton');
+const replacePdfFileInput = document.getElementById('replacePdfFileInput');
 const saveLayoutButton = document.getElementById('saveLayoutButton');
+const saveAsButton = document.getElementById('saveAsButton');
 const undoButton = document.getElementById('undoButton');
 const redoButton = document.getElementById('redoButton');
 const panToolButton = document.getElementById('panToolButton');
@@ -82,6 +93,13 @@ const zoomOutButton = document.getElementById('zoomOutButton');
 const zoomLabel = document.getElementById('zoomLabel');
 const staticTextChip = document.getElementById('staticTextChip');
 const calcChip = document.getElementById('calcChip');
+const listSettingsButton = document.getElementById('listSettingsButton');
+const listSettingsModal = document.getElementById('listSettingsModal');
+const listRowOriginYInput = document.getElementById('listRowOriginYInput');
+const listRowHeightInput = document.getElementById('listRowHeightInput');
+const listRepeatCountInput = document.getElementById('listRepeatCountInput');
+const listFrameLockedCheckbox = document.getElementById('listFrameLockedCheckbox');
+const listSettingsCloseButton = document.getElementById('listSettingsCloseButton');
 const jsEditorModal = document.getElementById('jsEditorModal');
 const jsEditorCancelButton = document.getElementById('jsEditorCancelButton');
 const jsEditorApplyButton = document.getElementById('jsEditorApplyButton');
@@ -96,6 +114,39 @@ staticTextChip.addEventListener('dragstart', (e) => {
 
 calcChip.addEventListener('dragstart', (e) => {
   e.dataTransfer.setData('text/field-kind', 'calc');
+});
+
+// --- 一覧表テンプレートの設定(繰り返し行の枠の位置・高さ・1ページあたりの行数) ---
+// 位置・高さはキャンバス上で青枠を直接ドラッグ/リサイズしても調整できる(startDragFrame/startResizeFrame)。
+// このモーダルは数値入力による微調整用。
+listSettingsButton.addEventListener('click', () => {
+  listRowOriginYInput.value = layout.listSettings.rowOriginY;
+  listRowHeightInput.value = layout.listSettings.rowHeightPt;
+  listRepeatCountInput.value = layout.listSettings.repeatCount;
+  listFrameLockedCheckbox.checked = layout.listSettings.locked;
+  listSettingsModal.classList.remove('hidden');
+});
+
+listFrameLockedCheckbox.addEventListener('change', (e) => {
+  layout.listSettings.locked = e.target.checked;
+  renderFieldChips();
+});
+
+listSettingsCloseButton.addEventListener('click', () => {
+  listSettingsModal.classList.add('hidden');
+});
+
+listRowOriginYInput.addEventListener('change', (e) => {
+  layout.listSettings.rowOriginY = roundTo1(parseFloat(e.target.value) || 0);
+  renderFieldChips();
+});
+listRowHeightInput.addEventListener('change', (e) => {
+  layout.listSettings.rowHeightPt = roundTo1(Math.max(parseFloat(e.target.value) || 8, 4));
+  renderFieldChips();
+});
+listRepeatCountInput.addEventListener('change', (e) => {
+  layout.listSettings.repeatCount = Math.max(parseInt(e.target.value, 10) || 1, 1);
+  renderFieldChips();
 });
 
 // --- JavaScript式エディタ(Monaco、モーダル表示) ---
@@ -143,17 +194,26 @@ async function openJsEditor(field) {
   }
 }
 
+/// <summary>JavaScript式内での挿入テキストへの変換。"行番号"→rowNumber、"ページ番号"→pageNumber、"総ページ数"→totalPages、"出力時間"→outputDateTime、それ以外はrow["列名"]。</summary>
+function toJsFormulaToken(token) {
+  if (token === '行番号') return 'rowNumber';
+  if (token === 'ページ番号') return 'pageNumber';
+  if (token === '総ページ数') return 'totalPages';
+  if (token === '出力時間') return 'outputDateTime';
+  return `row["${token}"]`;
+}
+
 /// <summary>
 /// モーダル内の変数挿入ボタンを描画し、クリック時にMonacoエディタのカーソル位置(または選択範囲)へ
-/// "row["列名"]" / "rowNumber" を挿入する。CSV未読込時など列が無ければ何も表示しない。
+/// "row["列名"]" / "rowNumber" / "pageNumber" / "totalPages" / "outputDateTime" を挿入する。
+/// CSV未読込時など列が無ければ何も表示しない。
 /// </summary>
 function renderJsEditorVariableButtons() {
-  jsEditorVariableRow.innerHTML = buildVariableInsertRowHtml(['行番号']);
+  jsEditorVariableRow.innerHTML = buildVariableInsertRowHtml(['行番号', 'ページ番号', '総ページ数', '出力時間']);
   jsEditorVariableRow.querySelectorAll('.variable-chip-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (!monacoEditorInstance) return;
-      const token = btn.dataset.token;
-      const insertText = token === '行番号' ? 'rowNumber' : `row["${token}"]`;
+      const insertText = toJsFormulaToken(btn.dataset.token);
       monacoEditorInstance.executeEdits('insert-variable', [{
         range: monacoEditorInstance.getSelection(),
         text: insertText,
@@ -368,9 +428,18 @@ async function init() {
     if (field.useJavaScriptFormula == null) field.useJavaScriptFormula = false;
     if (field.javaScriptFormula == null) field.javaScriptFormula = '';
   }
+  if (layout.kind == null) layout.kind = 'single';
+  if (layout.listSettings == null) {
+    layout.listSettings = { rowOriginY: 100, rowHeightPt: 20, repeatCount: 8, locked: false };
+  }
+  if (layout.listSettings.rowOriginY == null) layout.listSettings.rowOriginY = 100;
+  if (layout.listSettings.repeatCount == null) layout.listSettings.repeatCount = 8;
+  if (layout.listSettings.locked == null) layout.listSettings.locked = false;
+  isListKind = layout.kind === 'list';
+  listSettingsButton.classList.toggle('hidden', !isListKind);
   resetHistory();
 
-  templateNameLabel.textContent = layout.templateName;
+  renderTemplateNameLabel();
   csvEncodingSelect.value = layout.csvSettings.encoding;
   csvDelimiterInput.value = layout.csvSettings.delimiter;
   csvHasHeaderCheckbox.checked = layout.csvSettings.hasHeader;
@@ -447,7 +516,8 @@ canvasArea.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 async function renderTemplateBackground() {
-  const res = await fetch(templatePdfUrl(templateId));
+  // PDF差し替え直後にブラウザキャッシュから古い内容が返らないよう、都度キャッシュを回避する。
+  const res = await fetch(`${templatePdfUrl(templateId)}?t=${Date.now()}`);
   const buffer = await res.arrayBuffer();
   const info = await renderPdfToCanvas(buffer, pdfCanvas, displayScale);
   displayScale = info.displayScale;
@@ -534,23 +604,41 @@ pdfStage.addEventListener('drop', (e) => {
 });
 
 // --- 配置キャンバス上のフィールドチップ ---
+/// <summary>
+/// 一覧表テンプレートで、フィールドが「繰り返し行の枠」(listSettings.rowOriginY〜+rowHeightPt)の
+/// Y座標帯に入っているかどうかを判定する。枠内なら自動的にCSVの各行につき繰り返し描画される。
+/// </summary>
+function isFieldInRowFrame(field) {
+  if (!isListKind) return false;
+  const originY = layout.listSettings.rowOriginY;
+  const heightPt = layout.listSettings.rowHeightPt;
+  return field.y >= originY && field.y < originY + heightPt;
+}
+
 function renderFieldChips() {
-  // パレット上の「使用済み」表示をフィールド変更のたびに最新化する。
-  // 呼び出し元(追加/削除/列変更/Undo・Redo等)ごとに個別対応するより、ここで一括して合わせる方が漏れがない。
+  // パレット上の「使用済み」表示と、行送りバー(表フィールドの有無で表示が変わる)を
+  // フィールド変更のたびに最新化する。呼び出し元ごとに個別対応するより、ここで一括して合わせる方が漏れがない。
   renderPalette();
+  updateRowbar();
 
   pdfStage.querySelectorAll('.field-chip').forEach((el) => el.remove());
   // プレビュー中はshowPreview()が描画した実PDFの見た目だけを見せる。
   // pdfStageの背景クリック(selectField(null)経由)等、プレビュー中でも呼ばれ得る経路があるため、
   // 呼び出し元ごとに個別対応するのではなくここで一括してガードする。
-  if (isPreviewMode) return;
+  if (isPreviewMode) {
+    pdfStage.querySelectorAll('.repeat-ghost-row, .repeat-frame-row').forEach((el) => el.remove());
+    return;
+  }
+
+  // 実フィールドのチップより先に描画することで、チップが常に手前(操作可能な状態)で見えるようにする。
+  renderRepeatPreviewGhosts();
 
   for (const field of layout.fields) {
     const chip = document.createElement('div');
     // 外側の.field-chipはリサイズハンドルの表示領域を確保するため常にoverflow:visibleとし、
     // テキストのはみ出し処理は内側の.field-chip-contentだけに適用する。
     // overflow-${...}クラスは枠線の見た目(そのままの場合は点線)だけに使う。
-    chip.className = `field-chip overflow-${field.overflow}${field.locked ? ' locked' : ''}`;
+    chip.className = `field-chip overflow-${field.overflow}${field.locked ? ' locked' : ''}${isFieldInRowFrame(field) ? ' repeating' : ''}`;
     chip.style.left = `${ptToPx(field.x, displayScale)}px`;
     chip.style.top = `${ptToPx(field.y, displayScale)}px`;
     chip.style.width = `${ptToPx(field.maxWidthPt, displayScale)}px`;
@@ -625,6 +713,109 @@ function renderFieldChips() {
       addResizeHandle(chip, field, 'field-resize-handle-se', { resizeWidth: true, resizeHeight: true });
     }
   }
+}
+
+/// <summary>
+/// 一覧表テンプレートの「繰り返し行の枠」(1行目、青枠)と、2行目以降のプレビュー行(グレー表示+行番号)を
+/// キャンバス上に常時表示する(実PDF出力には出てこない、配置編集専用のガイド)。枠内に置いたフィールドが
+/// 自動的にCSVの各行につき繰り返し描画される。青枠自体はドラッグで移動・下端ドラッグでリサイズでき、
+/// 「一覧表の設定」を開かずに位置・高さを調整できる(微調整はモーダルの数値入力で行う)。
+/// listSettings.locked=trueの場合は枠のドラッグ・リサイズを禁止する。2行目以降はグレーの網掛けにして
+/// 実際に編集する場所ではないことが見た目でわかるようにする。
+/// プレビュー行数(1ページあたりの行数)は実際の出力のページ送りにもそのまま使われる。
+/// </summary>
+function renderRepeatPreviewGhosts() {
+  pdfStage.querySelectorAll('.repeat-ghost-row, .repeat-frame-row').forEach((el) => el.remove());
+  if (!isListKind) return;
+
+  const { rowOriginY, rowHeightPt, repeatCount, locked } = layout.listSettings;
+  const pageWidthPt = layout.pageSize.widthPt;
+
+  const frame = document.createElement('div');
+  frame.className = `repeat-frame-row${locked ? ' locked' : ''}`;
+  frame.style.left = '0px';
+  frame.style.top = `${ptToPx(rowOriginY, displayScale)}px`;
+  frame.style.width = `${ptToPx(pageWidthPt, displayScale)}px`;
+  frame.style.height = `${ptToPx(rowHeightPt, displayScale)}px`;
+  // グレーのプレビュー行(2行目以降)の番号ラベルと並べて見せることで、1行目だけがドラッグ・リサイズ可能な
+  // 編集行であることを数字とアクセントカラーの両方で明示する。
+  const frameLabel = document.createElement('span');
+  frameLabel.className = 'repeat-frame-label';
+  frameLabel.textContent = '1';
+  frame.appendChild(frameLabel);
+  if (!locked) {
+    frame.addEventListener('mousedown', (e) => startDragFrame(e));
+    const resizeHandle = document.createElement('div');
+    resizeHandle.className = 'repeat-frame-resize-handle';
+    resizeHandle.addEventListener('mousedown', (e) => startResizeFrame(e));
+    frame.appendChild(resizeHandle);
+  }
+  pdfStage.appendChild(frame);
+
+  for (let n = 1; n < repeatCount; n++) {
+    const isZebra = n % 2 === 1; // 2,4,6...行目(1始まり)に相当
+    const ghost = document.createElement('div');
+    ghost.className = `repeat-ghost-row${isZebra ? ' zebra' : ''}`;
+    ghost.style.left = '0px';
+    ghost.style.top = `${ptToPx(rowOriginY + n * rowHeightPt, displayScale)}px`;
+    ghost.style.width = `${ptToPx(pageWidthPt, displayScale)}px`;
+    ghost.style.height = `${ptToPx(rowHeightPt, displayScale)}px`;
+    const label = document.createElement('span');
+    label.className = 'repeat-ghost-label';
+    label.textContent = String(n + 1);
+    ghost.appendChild(label);
+    pdfStage.appendChild(ghost);
+  }
+}
+
+/// <summary>繰り返し行の枠をドラッグで上下に移動し、listSettings.rowOriginYを更新する(undo履歴の対象外)。</summary>
+function startDragFrame(e) {
+  if (isPreviewMode) return;
+  e.preventDefault();
+  e.stopPropagation();
+
+  const startY = e.clientY;
+  const originTopPx = ptToPx(layout.listSettings.rowOriginY, displayScale);
+
+  function onMouseMove(moveEvent) {
+    const dy = moveEvent.clientY - startY;
+    const newTopPx = Math.max(0, originTopPx + dy);
+    layout.listSettings.rowOriginY = roundTo1(pxToPt(newTopPx, displayScale));
+    renderFieldChips();
+  }
+
+  function onMouseUp() {
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  }
+
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+}
+
+/// <summary>繰り返し行の枠の下端をドラッグしてリサイズし、listSettings.rowHeightPtを更新する(undo履歴の対象外)。</summary>
+function startResizeFrame(e) {
+  if (isPreviewMode) return;
+  e.preventDefault();
+  e.stopPropagation();
+
+  const startY = e.clientY;
+  const originHeightPx = ptToPx(layout.listSettings.rowHeightPt, displayScale);
+
+  function onMouseMove(moveEvent) {
+    const dy = moveEvent.clientY - startY;
+    const newHeightPx = Math.max(ptToPx(4, displayScale), originHeightPx + dy);
+    layout.listSettings.rowHeightPt = roundTo1(pxToPt(newHeightPx, displayScale));
+    renderFieldChips();
+  }
+
+  function onMouseUp() {
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  }
+
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
 }
 
 function addResizeHandle(chip, field, className, axes) {
@@ -910,8 +1101,8 @@ function renderPropsPanel() {
     <div class="prop-row">
       <span class="field-label">テキスト内容(改行可)</span>
       <textarea class="text-input" id="propStaticText" rows="3">${escapeHtml(field.staticText ?? '')}</textarea>
-      <div class="field-hint">CSVの列を <code>{列名}</code>、行番号を <code>{行番号}</code> の形式で埋め込むと、行ごとの値に置き換わります(例: こんにちは、{氏名}様/No.{行番号})。</div>
-      ${buildVariableInsertRowHtml(['行番号'])}
+      <div class="field-hint">CSVの列を <code>{列名}</code>、行番号を <code>{行番号}</code>、ページ番号を <code>{ページ番号}</code>、総ページ数を <code>{総ページ数}</code>、出力を実行した日時を <code>{出力時間}</code> の形式で埋め込むと、それぞれの値に置き換わります(例: こんにちは、{氏名}様/No.{行番号}/{ページ番号} / {総ページ数}ページ/出力日時: {出力時間})。</div>
+      ${buildVariableInsertRowHtml(['行番号', 'ページ番号', '総ページ数', '出力時間'])}
     </div>`;
   } else if (field.kind === 'calc') {
     const jsMode = !!field.useJavaScriptFormula;
@@ -921,15 +1112,15 @@ function renderPropsPanel() {
       <span class="field-label">JavaScript式</span>
       <textarea class="text-input mono-input" id="propJsFormula" rows="3" placeholder='Number(row["単価"]) * Number(row["数量"])'>${escapeHtml(field.javaScriptFormula ?? '')}</textarea>
       <button type="button" class="btn" id="propJsFormulaOpenEditor">🖥 コードエディタで開く</button>
-      <div class="field-hint">CSVの値は <code>row["列名"]</code>、行番号は <code>rowNumber</code> で参照できます。三項演算子等での条件分岐も書けます。エラーやタイムアウトの場合は #ERROR と表示されます。</div>
-      ${buildVariableInsertRowHtml(['行番号'])}
+      <div class="field-hint">CSVの値は <code>row["列名"]</code>、行番号は <code>rowNumber</code>、ページ番号は <code>pageNumber</code>、総ページ数は <code>totalPages</code>、出力を実行した日時は <code>outputDateTime</code>(文字列)で参照できます。三項演算子等での条件分岐も書けます。エラーやタイムアウトの場合は #ERROR と表示されます。</div>
+      ${buildVariableInsertRowHtml(['行番号', 'ページ番号', '総ページ数', '出力時間'])}
     </div>`
       : `
     <div class="prop-row">
       <span class="field-label">計算式</span>
       <input type="text" class="text-input mono-input" id="propFormula" value="${escapeHtml(field.formula ?? '')}" placeholder="{単価}*{数量}" />
-      <div class="field-hint">CSVの列を <code>{列名}</code>、行番号を <code>{行番号}</code> として使い、+ - * / ( ) の式が書けます。参照列が無い・0除算などの場合は #ERROR と表示されます。</div>
-      ${buildVariableInsertRowHtml(['行番号'])}
+      <div class="field-hint">CSVの列を <code>{列名}</code>、行番号を <code>{行番号}</code>、ページ番号を <code>{ページ番号}</code>、総ページ数を <code>{総ページ数}</code> として使い、+ - * / ( ) の式が書けます。参照列が無い・0除算などの場合は #ERROR と表示されます。</div>
+      ${buildVariableInsertRowHtml(['行番号', 'ページ番号', '総ページ数'])}
     </div>`;
     sourceRowsHtml = `
     <div class="prop-row">
@@ -954,9 +1145,17 @@ function renderPropsPanel() {
   // データ型設定はCSV列由来のフィールドのみ意味を持つ(固定テキスト・計算フィールドは対象外)。
   const dataTypeSettingsHtml = field.kind === 'csv' ? buildDataTypeSettingsHtml(field) : '';
 
+  // 一覧表テンプレートのみ、このフィールドが「繰り返し行の枠」内にあるかどうかを表示する(自動判定・読み取り専用)。
+  const repeatingRowHtml = isListKind ? (
+    isFieldInRowFrame(field)
+      ? `<div class="prop-row"><span class="repeat-status-badge repeat-status-in-frame">🔁 枠内(CSV1行ごとに繰り返し描画)</span></div>`
+      : `<div class="prop-row"><span class="repeat-status-badge repeat-status-out-frame">📌 枠外(各ページに1回だけ固定描画)</span><div class="field-hint">「一覧表の設定」の青枠内にY座標を移動すると、自動的に繰り返し対象になります。枠外のフィールドに現在のページ番号を表示するには <code>{ページ番号}</code>(JS式では <code>pageNumber</code>)を使ってください({行番号}はここでは使えません)。</div></div>`
+  ) : '';
+
   propsPanel.innerHTML = `
     ${sourceRowsHtml}
     ${dataTypeSettingsHtml}
+    ${repeatingRowHtml}
     <div class="prop-row">
       <label><input type="checkbox" id="propLocked" ${field.locked ? 'checked' : ''} /> 🔒 位置とサイズをロック(移動・リサイズを禁止)</label>
     </div>
@@ -1062,7 +1261,7 @@ function renderPropsPanel() {
         field.javaScriptFormula = value;
         renderFieldChips();
         commitHistory();
-      }, (token) => (token === '行番号' ? 'rowNumber' : `row["${token}"]`));
+      }, toJsFormulaToken);
       document.getElementById('propJsFormulaOpenEditor').addEventListener('click', () => openJsEditor(field));
     } else {
       document.getElementById('propFormula').addEventListener('input', (e) => {
@@ -1132,7 +1331,11 @@ function renderPropsPanel() {
     field.y = parseFloat(e.target.value) || 0;
     renderFieldChips();
   });
-  document.getElementById('propY').addEventListener('change', commitHistory);
+  document.getElementById('propY').addEventListener('change', () => {
+    commitHistory();
+    // 一覧表テンプレートでは、Y移動で「枠内/枠外」の自動判定が変わり得るため、プロパティパネルの表示も更新する。
+    if (isListKind) renderPropsPanel();
+  });
   document.getElementById('propFont').addEventListener('change', (e) => {
     field.fontFamily = e.target.value;
     renderFieldChips();
@@ -1249,7 +1452,14 @@ csvConfirmButton.addEventListener('click', async () => {
 });
 
 // --- 行送りプレビュー ---
+/// <summary>一覧表テンプレートでは「現在の行」という概念が無いため、行送りではなく一覧表(先頭から一部の行)のプレビューになる。</summary>
 function updateRowbar() {
+  if (isListKind) {
+    rowbarText.textContent = '一覧表プレビュー(先頭ページのみ・行送り無効)';
+    prevRowButton.disabled = true;
+    nextRowButton.disabled = true;
+    return;
+  }
   rowbarText.textContent = csvRowCount === 0 ? 'CSV未読込' : `${currentRowIndex + 1} / ${csvRowCount} 行目`;
   prevRowButton.disabled = csvRowCount === 0 || currentRowIndex === 0;
   nextRowButton.disabled = csvRowCount === 0 || currentRowIndex >= csvRowCount - 1;
@@ -1284,16 +1494,99 @@ togglePreviewButton.addEventListener('click', async () => {
 
 async function showPreview() {
   try {
-    const blob = await renderPreview(templateId, layout.fields, csvSessionId, currentRowIndex);
+    const blob = isListKind
+      ? await renderListPreview(templateId, layout.fields, csvSessionId, layout.listSettings)
+      : await renderPreview(templateId, layout.fields, csvSessionId, currentRowIndex);
     const info = await renderPdfToCanvas(blob, pdfCanvas, displayScale);
     pdfStage.style.width = `${pdfCanvas.width}px`;
     pdfStage.style.height = `${pdfCanvas.height}px`;
     displayScale = info.displayScale;
     pdfStage.querySelectorAll('.field-chip').forEach((el) => el.remove());
+    pdfStage.querySelectorAll('.repeat-ghost-row, .repeat-frame-row').forEach((el) => el.remove());
   } catch (err) {
     showError(`プレビューの生成に失敗しました: ${err.message}`);
   }
 }
+
+// --- プロジェクト名表示・変更 ---
+function renderTemplateNameLabel() {
+  templateNameLabel.textContent = `${layout.templateName}${isListKind ? '(一覧表)' : ''}`;
+}
+
+renameTemplateButton.addEventListener('click', async () => {
+  const newName = window.prompt('新しいプロジェクト名を入力してください', layout.templateName);
+  if (newName === null) return; // キャンセル
+  const trimmedName = newName.trim();
+  if (!trimmedName) {
+    showError('プロジェクト名を入力してください。');
+    return;
+  }
+  if (trimmedName === layout.templateName) return;
+
+  const previousName = layout.templateName;
+  layout = { ...layout, templateName: trimmedName };
+  renderTemplateNameLabel();
+  renameTemplateButton.disabled = true;
+  try {
+    layout = await saveLayout(templateId, layout);
+  } catch (err) {
+    layout = { ...layout, templateName: previousName };
+    renderTemplateNameLabel();
+    showError(`プロジェクト名の変更に失敗しました: ${err.message}`);
+  } finally {
+    renameTemplateButton.disabled = false;
+  }
+});
+
+// --- PDF差し替え ---
+replacePdfButton.addEventListener('click', () => {
+  replacePdfFileInput.value = '';
+  replacePdfFileInput.click();
+});
+
+replacePdfFileInput.addEventListener('change', async () => {
+  if (replacePdfFileInput.files.length === 0) return;
+  const file = replacePdfFileInput.files[0];
+  if (!window.confirm('PDFを差し替えます。ページサイズが変わった場合、配置済みフィールドの位置がずれる可能性があります。続行しますか?')) {
+    return;
+  }
+
+  const previousPageSize = layout.pageSize;
+  replacePdfButton.disabled = true;
+  try {
+    layout = await replaceTemplatePdf(templateId, file);
+    await renderTemplateBackground();
+    renderFieldChips();
+    renderPropsPanel();
+    if (previousPageSize.widthPt !== layout.pageSize.widthPt || previousPageSize.heightPt !== layout.pageSize.heightPt) {
+      showError('PDFのページサイズが変わりました。フィールドの配置を確認してください。');
+    }
+  } catch (err) {
+    showError(`PDFの差し替えに失敗しました: ${err.message}`);
+  } finally {
+    replacePdfButton.disabled = false;
+  }
+});
+
+// --- 名前を付けて保存 ---
+saveAsButton.addEventListener('click', async () => {
+  const newName = window.prompt('新しいプロジェクト名を入力してください', `${layout.templateName} のコピー`);
+  if (newName === null) return; // キャンセル
+  const trimmedName = newName.trim();
+  if (!trimmedName) {
+    showError('プロジェクト名を入力してください。');
+    return;
+  }
+
+  saveAsButton.disabled = true;
+  try {
+    const newLayout = await saveAsTemplate(templateId, { ...layout, templateName: trimmedName });
+    window.location.href = `editor.html?templateId=${encodeURIComponent(newLayout.templateId)}`;
+  } catch (err) {
+    showError(`名前を付けて保存に失敗しました: ${err.message}`);
+    saveAsButton.disabled = false;
+  }
+});
 
 // --- レイアウト保存 ---
 saveLayoutButton.addEventListener('click', async () => {
@@ -1330,7 +1623,10 @@ goToOutputButton.addEventListener('click', async () => {
       csvSessionId,
       fields: layout.fields,
       rowCount: csvRowCount,
-      outputSettings: layout.outputSettings
+      outputSettings: layout.outputSettings,
+      kind: layout.kind,
+      listSettings: layout.listSettings,
+      csvHeaders
     }));
     window.location.href = 'output.html';
   } catch (err) {

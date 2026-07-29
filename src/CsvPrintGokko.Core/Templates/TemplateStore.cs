@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using CsvPrintGokko.Core.Json;
 using CsvPrintGokko.Core.Models;
@@ -35,7 +36,7 @@ public sealed class TemplateStore
     /// 新規テンプレートを作成する。アップロードされたPDFを保存し、1ページ目のサイズから
     /// 既定のcsvSettings/outputSettingsを持つlayout.jsonを生成する。
     /// </summary>
-    public TemplateLayout CreateTemplate(string templateName, Stream pdfContent)
+    public TemplateLayout CreateTemplate(string templateName, Stream pdfContent, TemplateKind kind = TemplateKind.Single)
     {
         if (string.IsNullOrWhiteSpace(templateName))
             throw new ArgumentException("テンプレート名を指定してください。", nameof(templateName));
@@ -64,7 +65,9 @@ public sealed class TemplateStore
             PageSize = pageSize,
             CsvSettings = new CsvSettings { Encoding = CsvEncoding.Utf8, Delimiter = ",", HasHeader = true },
             Fields = Array.Empty<FieldDefinition>(),
-            OutputSettings = new OutputSettings { Mode = OutputMode.Combined, FilenamePattern = "output_{row}.pdf" }
+            OutputSettings = new OutputSettings { Mode = OutputMode.Combined, FilenamePattern = "output_{row}.pdf" },
+            Kind = kind,
+            ListSettings = new ListRenderSettings()
         };
 
         return SaveLayout(layout);
@@ -122,6 +125,198 @@ public sealed class TemplateStore
     {
         var layout = GetLayout(templateId);
         return Path.Combine(GetTemplateDirectory(templateId), layout.PdfFileName);
+    }
+
+    /// <summary>テンプレートをPDF・layout.jsonごと完全に削除する(元に戻せない)。</summary>
+    public void DeleteTemplate(Guid templateId)
+    {
+        string dir = GetTemplateDirectory(templateId);
+        if (!Directory.Exists(dir))
+            throw new FileNotFoundException($"テンプレートが見つかりません: {templateId}");
+        Directory.Delete(dir, recursive: true);
+    }
+
+    /// <summary>
+    /// 現在編集中のレイアウト内容(未保存の変更を含む)を、PDF実体ごと新しいテンプレートとして
+    /// 複製保存する(「名前を付けて保存」)。複製元のテンプレートには一切手を加えない。
+    /// </summary>
+    public TemplateLayout SaveAsNewTemplate(Guid sourceTemplateId, TemplateLayout editedLayout)
+    {
+        if (string.IsNullOrWhiteSpace(editedLayout.TemplateName))
+            throw new ArgumentException("テンプレート名を指定してください。", nameof(editedLayout));
+
+        string sourceDir = GetTemplateDirectory(sourceTemplateId);
+        var sourceLayout = GetLayout(sourceTemplateId);
+        string sourcePdfPath = Path.Combine(sourceDir, sourceLayout.PdfFileName);
+        if (!File.Exists(sourcePdfPath))
+            throw new FileNotFoundException("複製元のPDFが見つかりません。");
+
+        var newTemplateId = Guid.NewGuid();
+        string newDir = GetTemplateDirectory(newTemplateId);
+        Directory.CreateDirectory(newDir);
+
+        string newPdfPath = Path.Combine(newDir, sourceLayout.PdfFileName);
+        File.Copy(sourcePdfPath, newPdfPath);
+
+        // CSVが複製元テンプレート専用フォルダ内(インポート由来など)にある場合は一緒に複製し、
+        // パスも新フォルダを指すよう書き換える。フォルダ外の任意のパスはそのまま共有参照する。
+        string? newCsvPath = editedLayout.CsvSettings.LastFilePath;
+        if (newCsvPath is not null && File.Exists(newCsvPath))
+        {
+            string fullSourceDir = Path.GetFullPath(sourceDir);
+            string fullCsvDir = Path.GetFullPath(Path.GetDirectoryName(newCsvPath)!);
+            if (string.Equals(fullCsvDir, fullSourceDir, StringComparison.OrdinalIgnoreCase))
+            {
+                string copiedCsvPath = Path.Combine(newDir, Path.GetFileName(newCsvPath));
+                File.Copy(newCsvPath, copiedCsvPath);
+                newCsvPath = copiedCsvPath;
+            }
+        }
+
+        var now = DateTime.UtcNow;
+        var newLayout = editedLayout with
+        {
+            TemplateId = newTemplateId,
+            PdfFileName = sourceLayout.PdfFileName,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            CsvSettings = editedLayout.CsvSettings with { LastFilePath = newCsvPath }
+        };
+
+        return SaveLayout(newLayout);
+    }
+
+    /// <summary>
+    /// 既存テンプレートのPDF実体を新しいPDFに差し替える。ページサイズは新PDFの1ページ目から
+    /// 再取得してlayoutに反映する(既存フィールドの座標自体は変更しないため、ページサイズが
+    /// 変わった場合の見た目の調整は呼び出し側=UIの responsibility とする)。
+    /// アップロードされたPDFが不正な場合、元のPDFファイルを壊さないよう一時ファイル経由で検証する。
+    /// </summary>
+    public TemplateLayout ReplacePdf(Guid templateId, Stream pdfContent)
+    {
+        var layout = GetLayout(templateId);
+        string dir = GetTemplateDirectory(templateId);
+        string pdfPath = Path.Combine(dir, layout.PdfFileName);
+        string tempPath = pdfPath + ".tmp";
+
+        using (var fileStream = File.Create(tempPath))
+        {
+            pdfContent.CopyTo(fileStream);
+        }
+
+        PageSize newPageSize;
+        try
+        {
+            newPageSize = ReadFirstPageSize(tempPath);
+        }
+        catch
+        {
+            File.Delete(tempPath);
+            throw;
+        }
+
+        File.Copy(tempPath, pdfPath, overwrite: true);
+        File.Delete(tempPath);
+
+        var updated = layout with { PageSize = newPageSize };
+        return SaveLayout(updated);
+    }
+
+    private const string ProjectPdfEntryName = "template.pdf";
+    private const string ProjectLayoutEntryName = "layout.json";
+    private const string ProjectCsvEntryName = "data.csv";
+
+    /// <summary>
+    /// テンプレート(PDF+layout.json)と、最後に読み込んだCSV(存在すれば)を1つのzipにまとめて返す。
+    /// 別の環境へそのまま持ち出し、ImportProjectで読み込めるようにするための書き出し。
+    /// CSVファイルが見つからない(移動・削除済み)場合はCSV無しで書き出し、layout.json内の
+    /// LastFilePathはnullにしておく(インポート先に存在しないパスを自動読み込みしようとして
+    /// エラーになるのを防ぐため)。
+    /// </summary>
+    public byte[] ExportProject(Guid templateId)
+    {
+        var layout = GetLayout(templateId);
+        string dir = GetTemplateDirectory(templateId);
+        string pdfPath = Path.Combine(dir, layout.PdfFileName);
+
+        string? csvPath = layout.CsvSettings.LastFilePath;
+        bool csvExists = csvPath is not null && File.Exists(csvPath);
+
+        var exportLayout = layout with
+        {
+            CsvSettings = layout.CsvSettings with { LastFilePath = csvExists ? ProjectCsvEntryName : null }
+        };
+
+        using var memoryStream = new MemoryStream();
+        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var layoutEntry = archive.CreateEntry(ProjectLayoutEntryName);
+            using (var writer = new StreamWriter(layoutEntry.Open()))
+                writer.Write(JsonSerializer.Serialize(exportLayout, JsonDefaults.Options));
+
+            archive.CreateEntryFromFile(pdfPath, ProjectPdfEntryName);
+
+            if (csvExists)
+                archive.CreateEntryFromFile(csvPath!, ProjectCsvEntryName);
+        }
+
+        return memoryStream.ToArray();
+    }
+
+    /// <summary>
+    /// ExportProjectで作成したzipから新規テンプレートとしてインポートする。
+    /// テンプレートIDは常に新規採番する(インポート元・既存テンプレートとのID衝突を避けるため)。
+    /// CSVが同梱されていればテンプレート専用フォルダ内に保存し、LastFilePathをその絶対パスに
+    /// 書き換えることで、配置エディタの「前回CSVの自動読込」がそのまま機能するようにする。
+    /// </summary>
+    public TemplateLayout ImportProject(Stream zipContent)
+    {
+        using var archive = new ZipArchive(zipContent, ZipArchiveMode.Read);
+
+        var layoutEntry = archive.GetEntry(ProjectLayoutEntryName)
+            ?? throw new InvalidDataException("プロジェクトファイルにlayout.jsonが含まれていません。");
+        var pdfEntry = archive.GetEntry(ProjectPdfEntryName)
+            ?? throw new InvalidDataException("プロジェクトファイルにtemplate.pdfが含まれていません。");
+
+        TemplateLayout importedLayout;
+        using (var reader = new StreamReader(layoutEntry.Open()))
+        {
+            string json = reader.ReadToEnd();
+            importedLayout = JsonSerializer.Deserialize<TemplateLayout>(json, JsonDefaults.Options)
+                ?? throw new InvalidDataException("layout.jsonの形式が不正です。");
+        }
+
+        var newTemplateId = Guid.NewGuid();
+        string dir = GetTemplateDirectory(newTemplateId);
+        Directory.CreateDirectory(dir);
+
+        using (var pdfEntryStream = pdfEntry.Open())
+        using (var pdfFileStream = File.Create(Path.Combine(dir, ProjectPdfEntryName)))
+        {
+            pdfEntryStream.CopyTo(pdfFileStream);
+        }
+
+        string? newCsvPath = null;
+        var csvEntry = archive.GetEntry(ProjectCsvEntryName);
+        if (csvEntry is not null)
+        {
+            newCsvPath = Path.Combine(dir, ProjectCsvEntryName);
+            using var csvEntryStream = csvEntry.Open();
+            using var csvFileStream = File.Create(newCsvPath);
+            csvEntryStream.CopyTo(csvFileStream);
+        }
+
+        var now = DateTime.UtcNow;
+        var finalLayout = importedLayout with
+        {
+            TemplateId = newTemplateId,
+            PdfFileName = ProjectPdfEntryName,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            CsvSettings = importedLayout.CsvSettings with { LastFilePath = newCsvPath }
+        };
+
+        return SaveLayout(finalLayout);
     }
 
     private string GetTemplateDirectory(Guid templateId) => Path.Combine(_rootDirectory, templateId.ToString());
