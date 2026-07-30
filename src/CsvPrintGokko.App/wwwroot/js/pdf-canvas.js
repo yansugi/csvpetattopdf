@@ -4,7 +4,11 @@
 
 import * as pdfjsLib from '../lib/pdfjs/pdf.min.mjs';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('../lib/pdfjs/pdf.worker.min.mjs', import.meta.url).href;
+// pdf.js本体とWorkerのバージョンが食い違うと実行時エラーになる(例: ブラウザがWorkerファイルだけ
+// 更新前のバージョンをキャッシュしたまま使ってしまう)。バージョン文字列をクエリに付与することで、
+// アプリ更新時にWorkerのURLも必ず変わるようにし、古いキャッシュを参照させないようにする。
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  new URL('../lib/pdfjs/pdf.worker.min.mjs', import.meta.url).href + '?v=' + pdfjsLib.version;
 
 /**
  * PDFデータ(ArrayBufferまたはBlob)を指定canvasに描画する。
