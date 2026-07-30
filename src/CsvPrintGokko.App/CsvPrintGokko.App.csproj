@@ -9,6 +9,11 @@
     <None Include="samples\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- 配布用の操作マニュアル(docs/操作マニュアル.mdをPDF化したもの)。exeと同じフォルダにコピーする。 -->
+  <ItemGroup>
+    <None Include="manual\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
