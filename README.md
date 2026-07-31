@@ -9,7 +9,7 @@ CSVの各行データをPDFテンプレート上の指定位置に差し込み�
 ## 特徴
 
 - **完全オフライン動作** — インターネット接続不要。個人情報を含むCSVを外部に送信しません。
-- **ローカル完結型Webアプリ** — 実行するとASP.NET Core(Kestrel)がループバックアドレス(`127.0.0.1`)のみで起動し、既定のブラウザでUIが開きます。外部からはアクセスできません。
+- **ローカル完結型Webアプリ** — 実行するとASP.NET Core(Kestrel)がループバックアドレス(`127.0.0.1`)のみで起動し、WebView2(Chromiumベースの組み込みブラウザコントロール)を使った専用ウィンドウでUIが表示されます。既定のブラウザは使わないため、ブラウザの拡張機能やバージョン差異に表示が左右されません。外部からはアクセスできません。
 - **単票・一覧表の両対応** — CSV1行につき1ページを生成する「単票」モードと、CSV全行を1つの表にまとめる「一覧表」モードを切り替えられます。
 - **柔軟な文字・数式** — 自由テキスト、CSV列の差し込みに加え、四則演算の計算式、より高度なJavaScript式(Jint)による計算フィールドにも対応。
 - **配布はexe1つ** — `dotnet publish`でWindows向け自己完結型の単一exeとして書き出せます。
@@ -25,7 +25,7 @@ CSVの各行データをPDFテンプレート上の指定位置に差し込み�
 - 名前を付けて保存(現在編集中の内容をPDFごと新しいプロジェクトとして複製)
 - 背景PDFの差し替え(ページサイズが変わった場合は警告)
 - プロジェクト名のいつでも変更可能な編集(リネーム)
-- ブラウザを閉じるとバックグラウンドプロセスも自動的に終了(ハートビート監視)
+- ウィンドウを閉じるとバックグラウンドプロセスも自動的に終了
 
 ## サンプルを試す
 
@@ -49,7 +49,7 @@ csvprintgokko/
 ├── src/
 │   ├── CsvPrintGokko.App/       ASP.NET Core本体(Kestrel起動・APIエンドポイント・フロントエンド)
 │   │   ├── Endpoints/            テンプレート・CSV・プレビュー・出力・ダイアログ等のAPI
-│   │   ├── Services/             STAダイアログ・ハートビート監視などのサービス
+│   │   ├── Services/             STAダイアログなどのサービス
 │   │   └── wwwroot/              ビルドレスの素のHTML/CSS/JSフロントエンド
 │   └── CsvPrintGokko.Core/      UI/HTTPに依存しない業務ロジック(class library)
 │       ├── Csv/                  CSV読み込み
@@ -71,11 +71,11 @@ dotnet build
 # テスト実行
 dotnet test
 
-# 起動(既定のブラウザが自動的に開きます)
+# 起動(WebView2の専用ウィンドウが自動的に開きます)
 dotnet run --project src/CsvPrintGokko.App/CsvPrintGokko.App.csproj
 ```
 
-起動すると `http://127.0.0.1:48923` でKestrelがリッスンし、ブラウザが自動的に開きます。ブラウザを全て閉じると、バックグラウンドプロセスも数秒〜90秒程度で自動的に終了します。
+起動すると `http://127.0.0.1:48923` でKestrelがリッスンし、WebView2を埋め込んだ専用ウィンドウが自動的に開きます。ウィンドウを閉じると、バックグラウンドプロセスも即座に終了します。
 
 ## 配布用パッケージング
 
@@ -93,10 +93,11 @@ dotnet publish src/CsvPrintGokko.App/CsvPrintGokko.App.csproj `
 ## 技術スタック
 
 - ASP.NET Core Minimal API + Kestrel(ループバック固定)
+- [Microsoft.Web.WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) — UIをホストする専用ウィンドウ(WinForms + Chromiumベースの組み込みブラウザコントロール)
 - [PDFsharp](https://www.pdfsharp.net/) — PDF生成・合成
 - [Jint](https://github.com/sebastienros/jint) — JavaScript式による計算フィールドの評価
 - [CsvHelper](https://joshclose.github.io/CsvHelper/) — CSV読み込み
-- pdf.js — ブラウザ側でのPDFプレビュー描画
+- pdf.js — WebView2内でのPDFプレビュー描画
 - Monaco Editor — JavaScript計算式エディタ
 - フロントエンドはビルドステップ無しの素のHTML/CSS/JS
 

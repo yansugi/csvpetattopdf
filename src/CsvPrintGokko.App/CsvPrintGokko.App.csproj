@@ -4,6 +4,15 @@
     <ProjectReference Include="..\CsvPrintGokko.Core\CsvPrintGokko.Core.csproj" />
   </ItemGroup>
 
+  <!--
+    UIをWebView2(Chromiumベースの組み込みブラウザコントロール)でホストするための参照。
+    ランタイムはOS標準搭載のEvergreen版に依存し、配布物には同梱しない。
+    バージョンはCLAUDE.mdの依存関係更新ポリシーに従い、公開から十分な期間が経過した安定版を明示的に固定する。
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+  </ItemGroup>
+
   <!-- 初めて使う人向けのサンプル(CSV+単票PDF)。ビルド・発行の都度、exeと同じフォルダにコピーする。 -->
   <ItemGroup>
     <None Include="samples\**" CopyToOutputDirectory="PreserveNewest" />
