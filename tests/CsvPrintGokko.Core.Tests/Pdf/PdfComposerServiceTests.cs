@@ -64,6 +64,77 @@ public sealed class PdfComposerServiceTests
         Assert.Equal(1, document.PageCount);
     }
 
+    private static FieldDefinition CreateQrField(string staticText, double? maxWidthPt = 80) => new()
+    {
+        Id = Guid.NewGuid(),
+        Kind = FieldKind.Qr,
+        StaticText = staticText,
+        X = 40,
+        Y = 80,
+        MaxWidthPt = maxWidthPt,
+        FontFamily = "Yu Gothic",
+        FontSizePt = 12,
+        Color = "#000000",
+        Align = TextAlign.Left
+    };
+
+    [Fact]
+    public void ComposeSinglePage_QRフィールドはCSV列を埋め込んだ内容で非空PDFを生成する()
+    {
+        string templatePath = TestPdfFactory.CreateBlankSinglePagePdf();
+        var sut = new PdfComposerService();
+        var rowData = new Dictionary<string, string> { ["URL"] = "https://example.com/山田太郎" };
+
+        using var document = sut.ComposeSinglePage(templatePath, new[] { CreateQrField("{URL}") }, rowData);
+
+        Assert.Equal(1, document.PageCount);
+    }
+
+    [Fact]
+    public void ComposeSinglePage_QR内容が空文字に解決される場合は例外にせず描画をスキップする()
+    {
+        string templatePath = TestPdfFactory.CreateBlankSinglePagePdf();
+        var sut = new PdfComposerService();
+        var rowData = new Dictionary<string, string>(); // "{URL}"が解決できず空文字になる
+
+        using var document = sut.ComposeSinglePage(templatePath, new[] { CreateQrField("{URL}") }, rowData);
+
+        Assert.Equal(1, document.PageCount);
+    }
+
+    [Fact]
+    public void ComposeSinglePage_QRの高度な設定はJavaScript式の評価結果を内容にする()
+    {
+        string templatePath = TestPdfFactory.CreateBlankSinglePagePdf();
+        var sut = new PdfComposerService();
+        var field = CreateQrField(staticText: "") with
+        {
+            UseJavaScriptFormula = true,
+            JavaScriptFormula = "'https://example.com/' + row[\"URL\"]"
+        };
+        var rowData = new Dictionary<string, string> { ["URL"] = "abc123" };
+
+        using var document = sut.ComposeSinglePage(templatePath, new[] { field }, rowData);
+
+        Assert.Equal(1, document.PageCount);
+    }
+
+    [Fact]
+    public void ComposeSinglePage_QRのJavaScript式が評価失敗した場合は例外にせず継続する()
+    {
+        string templatePath = TestPdfFactory.CreateBlankSinglePagePdf();
+        var sut = new PdfComposerService();
+        var field = CreateQrField(staticText: "") with
+        {
+            UseJavaScriptFormula = true,
+            JavaScriptFormula = "throw new Error('boom')"
+        };
+
+        using var document = sut.ComposeSinglePage(templatePath, new[] { field }, new Dictionary<string, string>());
+
+        Assert.Equal(1, document.PageCount);
+    }
+
     // Y=40は各テストのListRenderSettings.RowOriginY(=40)と合わせてあり、
     // 「繰り返し行の枠」内に収まる位置に配置することで自動的に繰り返し対象として扱われる。
     private static FieldDefinition CreateRepeatingField(string csvColumn, double x, DataType dataType = DataType.Text) => new()

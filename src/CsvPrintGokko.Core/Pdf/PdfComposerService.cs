@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using CsvPrintGokko.Core.Models;
 using PdfSharp.Drawing;
@@ -158,6 +157,34 @@ public sealed class PdfComposerService
             }
             DrawField(gfx, page, field, calcText);
         }
+        else if (field.Kind == FieldKind.Qr)
+        {
+            // QRコードの内容は、既定では自由テキストと同じ"{列名}"等の変数記法(TextVariableResolver)で解決する。
+            // UseJavaScriptFormula=trueの場合は計算フィールドと同じ高度な設定として、JavaScript式(Jint)の
+            // 評価結果(文字列)をそのまま内容にする(評価失敗時は計算フィールドと同様に#ERROR表示にする)。
+            string? content;
+            if (field.UseJavaScriptFormula)
+            {
+                content = JsFormulaEvaluator.TryEvaluate(field.JavaScriptFormula ?? string.Empty, rowData, rowNumber, pageNumber, totalPageCount, outputDateTime, out var jsResult)
+                    ? (jsResult.IsNumber ? CsvValueFormatter.FormatNumberValue(field, jsResult.NumberValue) : jsResult.DisplayText)
+                    : null;
+            }
+            else
+            {
+                content = TextVariableResolver.Resolve(field.StaticText ?? string.Empty, rowData, rowNumber, pageNumber, totalPageCount, outputDateTime);
+            }
+
+            if (content is null)
+            {
+                DrawField(gfx, page, field, "#ERROR");
+            }
+            else if (!string.IsNullOrEmpty(content))
+            {
+                // 内容が空文字の場合はCSV列未マッピング等と同様に描画をスキップする。
+                if (!QrCodeRenderer.TryDraw(gfx, field, content, out string? error))
+                    DrawField(gfx, page, field, error ?? "#ERROR");
+            }
+        }
         // CSVに対応する列が無い場合は描画をスキップする(列マッピングの不整合はPhase 4のUIで警告する想定)。
         else if (field.CsvColumn is not null && rowData.TryGetValue(field.CsvColumn, out var text) && text is not null)
         {
@@ -167,7 +194,7 @@ public sealed class PdfComposerService
 
     private static void DrawField(XGraphics gfx, PdfPage page, FieldDefinition field, string text)
     {
-        var brush = new XSolidBrush(ParseHexColor(field.Color));
+        var brush = new XSolidBrush(HexColorParser.Parse(field.Color));
         double effectiveWidth = field.MaxWidthPt ?? Math.Max(page.Width.Point - field.X, 10.0);
         var format = BuildStringFormat(field.Align, field.VerticalAlign);
         // 明示的な改行(\n)を段落として扱う。自由テキストの複数行入力や、CSV値に改行が含まれる場合に対応する。
@@ -223,7 +250,7 @@ public sealed class PdfComposerService
     private static void DrawBackground(XGraphics gfx, FieldDefinition field, double width, double height)
     {
         if (field.BackgroundColor is null) return;
-        gfx.DrawRectangle(new XSolidBrush(ParseHexColor(field.BackgroundColor)), field.X, field.Y, width, height);
+        gfx.DrawRectangle(new XSolidBrush(HexColorParser.Parse(field.BackgroundColor)), field.X, field.Y, width, height);
     }
 
     /// <summary>横配置・縦配置の組み合わせをPDFsharpのXStringFormatに変換する。</summary>
@@ -312,17 +339,5 @@ public sealed class PdfComposerService
         }
         if (current.Length > 0)
             yield return current.ToString();
-    }
-
-    private static XColor ParseHexColor(string hex)
-    {
-        string h = hex.TrimStart('#');
-        if (h.Length != 6 || !int.TryParse(h, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int rgb))
-            throw new FormatException($"不正な色コードです(#RRGGBB形式で指定してください): {hex}");
-
-        byte r = (byte)((rgb >> 16) & 0xFF);
-        byte g = (byte)((rgb >> 8) & 0xFF);
-        byte b = (byte)(rgb & 0xFF);
-        return XColor.FromArgb(r, g, b);
     }
 }

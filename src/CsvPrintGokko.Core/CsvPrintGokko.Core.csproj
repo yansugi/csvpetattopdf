@@ -11,6 +11,15 @@
     <PackageReference Include="CsvHelper" Version="33.0.1" />
     <PackageReference Include="Jint" Version="4.14.0" />
     <PackageReference Include="PdfSharp" Version="6.1.1" />
+    <!--
+      QRコード(FieldKind.Qr)のモジュール行列生成に使用。net8.0向けの依存関係グループが無いため
+      net6.0グループが解決され、System.Drawing.Common 6.0.0が実行時依存として実際にビルド成果物へ
+      含まれる(QrCodeRendererはBitmap等の画像化APIは使わずモジュール行列を直接ベクター描画するだけだが、
+      パッケージ全体としての依存解決では巻き込まれるため)。
+      バージョン1.8.0はCLAUDE.mdの依存関係更新ポリシーに従い、公開日(2026-04-04)から十分な期間が
+      経過した安定版として選定した。
+    -->
+    <PackageReference Include="QRCoder" Version="1.8.0" />
     <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
   </ItemGroup>
 

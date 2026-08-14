@@ -19,6 +19,8 @@ const DEFAULT_FIELD_WIDTH_PT = 100;
 const MIN_FIELD_WIDTH_PT = 20;
 const DEFAULT_FIELD_HEIGHT_PT = 24;
 const MIN_FIELD_HEIGHT_PT = 10;
+const DEFAULT_QR_SIZE_PT = 80;
+const MIN_QR_SIZE_PT = 20;
 const MIN_CHIP_FONT_PX = 8;
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 3.0;
@@ -93,6 +95,7 @@ const zoomOutButton = document.getElementById('zoomOutButton');
 const zoomLabel = document.getElementById('zoomLabel');
 const staticTextChip = document.getElementById('staticTextChip');
 const calcChip = document.getElementById('calcChip');
+const qrChip = document.getElementById('qrChip');
 const listSettingsButton = document.getElementById('listSettingsButton');
 const listSettingsModal = document.getElementById('listSettingsModal');
 const listRowOriginYInput = document.getElementById('listRowOriginYInput');
@@ -114,6 +117,10 @@ staticTextChip.addEventListener('dragstart', (e) => {
 
 calcChip.addEventListener('dragstart', (e) => {
   e.dataTransfer.setData('text/field-kind', 'calc');
+});
+
+qrChip.addEventListener('dragstart', (e) => {
+  e.dataTransfer.setData('text/field-kind', 'qr');
 });
 
 // --- 一覧表テンプレートの設定(繰り返し行の枠の位置・高さ・1ページあたりの行数) ---
@@ -427,6 +434,7 @@ async function init() {
     if (field.formula == null) field.formula = '';
     if (field.useJavaScriptFormula == null) field.useJavaScriptFormula = false;
     if (field.javaScriptFormula == null) field.javaScriptFormula = '';
+    if (field.qrErrorCorrectionLevel == null) field.qrErrorCorrectionLevel = 'medium';
   }
   if (layout.kind == null) layout.kind = 'single';
   if (layout.listSettings == null) {
@@ -559,8 +567,9 @@ pdfStage.addEventListener('drop', (e) => {
   if (isPreviewMode) return;
   const fieldKind = e.dataTransfer.getData('text/field-kind');
   const column = e.dataTransfer.getData('text/csv-column');
-  const isToolField = fieldKind === 'text' || fieldKind === 'calc';
+  const isToolField = fieldKind === 'text' || fieldKind === 'calc' || fieldKind === 'qr';
   if (!isToolField && !column) return;
+  const isQr = fieldKind === 'qr';
 
   const stageRect = pdfStage.getBoundingClientRect();
   const xPx = e.clientX - stageRect.left;
@@ -570,22 +579,25 @@ pdfStage.addEventListener('drop', (e) => {
     id: crypto.randomUUID(),
     kind: isToolField ? fieldKind : 'csv',
     csvColumn: isToolField ? null : column,
-    staticText: fieldKind === 'text' ? 'テキスト' : null,
+    staticText: fieldKind === 'text' ? 'テキスト' : (isQr ? 'https://example.com' : null),
     formula: '',
     useJavaScriptFormula: false,
     javaScriptFormula: '',
+    qrErrorCorrectionLevel: 'medium',
     label: null,
     x: pxToPt(xPx, displayScale),
     y: pxToPt(yPx, displayScale),
     fontFamily: 'Yu Gothic',
     fontSizePt: 12,
-    color: '#1F2A2E',
-    backgroundColor: null,
+    // QRコードは白地に黒の方がスキャン耐性が高いため、既定色を通常のテキストと分けている。
+    color: isQr ? '#000000' : '#1F2A2E',
+    backgroundColor: isQr ? '#FFFFFF' : null,
     align: 'left',
     verticalAlign: 'top',
     overflow: 'none',
-    maxWidthPt: DEFAULT_FIELD_WIDTH_PT,
-    heightPt: DEFAULT_FIELD_HEIGHT_PT,
+    // QRコードは正方形固定のため、幅・高さを同じ値で初期化する(リサイズも常に連動させる)。
+    maxWidthPt: isQr ? DEFAULT_QR_SIZE_PT : DEFAULT_FIELD_WIDTH_PT,
+    heightPt: isQr ? DEFAULT_QR_SIZE_PT : DEFAULT_FIELD_HEIGHT_PT,
     locked: false,
     dataType: 'text',
     dateFormatKind: 'slash',
@@ -650,6 +662,14 @@ function renderFieldChips() {
     content.className = `field-chip-content overflow-${field.overflow}`;
     if (field.kind === 'text') {
       content.textContent = field.staticText || '(空のテキスト)';
+    } else if (field.kind === 'qr') {
+      // 配置エディタ上では実際のQR画像までは生成せず(専用ライブラリを追加しない方針のため)、
+      // 内容の近似表示に留める。実際の見た目は「プレビュー切替」(実PDFのレンダリング)で確認できる。
+      const qrLabel = field.useJavaScriptFormula
+        ? (field.javaScriptFormula ? `= JS: ${field.javaScriptFormula}` : '(JS式未設定)')
+        : (field.staticText || '(内容未設定)');
+      content.textContent = `▦ ${qrLabel}`;
+      chip.classList.add('field-chip-qr');
     } else if (field.kind === 'calc') {
       if (field.useJavaScriptFormula) {
         content.textContent = field.javaScriptFormula ? `= JS: ${field.javaScriptFormula}` : '(JS式未設定)';
@@ -708,9 +728,14 @@ function renderFieldChips() {
 
     // ロック中はリサイズハンドルを出さず、誤操作でのサイズ変更を防ぐ。
     if (field.id === selectedFieldId && !field.locked) {
-      addResizeHandle(chip, field, 'field-resize-handle-e', { resizeWidth: true, resizeHeight: false });
-      addResizeHandle(chip, field, 'field-resize-handle-s', { resizeWidth: false, resizeHeight: true });
-      addResizeHandle(chip, field, 'field-resize-handle-se', { resizeWidth: true, resizeHeight: true });
+      if (field.kind === 'qr') {
+        // QRコードは正方形固定のため、幅・高さを連動させる角(右下)のハンドルのみを出す。
+        addResizeHandle(chip, field, 'field-resize-handle-se', { uniform: true });
+      } else {
+        addResizeHandle(chip, field, 'field-resize-handle-e', { resizeWidth: true, resizeHeight: false });
+        addResizeHandle(chip, field, 'field-resize-handle-s', { resizeWidth: false, resizeHeight: true });
+        addResizeHandle(chip, field, 'field-resize-handle-se', { resizeWidth: true, resizeHeight: true });
+      }
     }
   }
 }
@@ -895,7 +920,7 @@ function updatePropsPanelPosition(field) {
   if (yInput) yInput.value = field.y.toFixed(1);
 }
 
-function startResizeField(e, field, { resizeWidth, resizeHeight }) {
+function startResizeField(e, field, { resizeWidth, resizeHeight, uniform }) {
   e.preventDefault();
   e.stopPropagation();
 
@@ -906,15 +931,25 @@ function startResizeField(e, field, { resizeWidth, resizeHeight }) {
   let resized = false;
 
   function onMouseMove(moveEvent) {
-    if (resizeWidth) {
+    if (uniform) {
+      // QRコード用: 幅・高さを常に同じ値にし、正方形を保ったままリサイズする。
       const dx = moveEvent.clientX - startX;
-      const newWidthPx = Math.max(ptToPx(MIN_FIELD_WIDTH_PT, displayScale), originWidthPx + dx);
-      field.maxWidthPt = roundTo2(pxToPt(newWidthPx, displayScale));
-    }
-    if (resizeHeight) {
       const dy = moveEvent.clientY - startY;
-      const newHeightPx = Math.max(ptToPx(MIN_FIELD_HEIGHT_PT, displayScale), originHeightPx + dy);
-      field.heightPt = roundTo2(pxToPt(newHeightPx, displayScale));
+      const newSizePx = Math.max(ptToPx(MIN_QR_SIZE_PT, displayScale), originWidthPx + Math.max(dx, dy));
+      const newSizePt = roundTo2(pxToPt(newSizePx, displayScale));
+      field.maxWidthPt = newSizePt;
+      field.heightPt = newSizePt;
+    } else {
+      if (resizeWidth) {
+        const dx = moveEvent.clientX - startX;
+        const newWidthPx = Math.max(ptToPx(MIN_FIELD_WIDTH_PT, displayScale), originWidthPx + dx);
+        field.maxWidthPt = roundTo2(pxToPt(newWidthPx, displayScale));
+      }
+      if (resizeHeight) {
+        const dy = moveEvent.clientY - startY;
+        const newHeightPx = Math.max(ptToPx(MIN_FIELD_HEIGHT_PT, displayScale), originHeightPx + dy);
+        field.heightPt = roundTo2(pxToPt(newHeightPx, displayScale));
+      }
     }
     resized = true;
     renderFieldChips();
@@ -1104,6 +1139,39 @@ function renderPropsPanel() {
       <div class="field-hint">CSVの列を <code>{列名}</code>、行番号を <code>{行番号}</code>、ページ番号を <code>{ページ番号}</code>、総ページ数を <code>{総ページ数}</code>、出力を実行した日時を <code>{出力時間}</code> の形式で埋め込むと、それぞれの値に置き換わります(例: こんにちは、{氏名}様/No.{行番号}/{ページ番号} / {総ページ数}ページ/出力日時: {出力時間})。</div>
       ${buildVariableInsertRowHtml(['行番号', 'ページ番号', '総ページ数', '出力時間'])}
     </div>`;
+  } else if (field.kind === 'qr') {
+    const qrJsMode = !!field.useJavaScriptFormula;
+    const qrContentRowHtml = qrJsMode
+      ? `
+    <div class="prop-row">
+      <span class="field-label">JavaScript式</span>
+      <textarea class="text-input mono-input" id="propJsFormula" rows="3" placeholder='"https://example.com/" + row["顧客ID"]'>${escapeHtml(field.javaScriptFormula ?? '')}</textarea>
+      <button type="button" class="btn" id="propJsFormulaOpenEditor">🖥 コードエディタで開く</button>
+      <div class="field-hint">CSVの値は <code>row["列名"]</code>、行番号は <code>rowNumber</code>、ページ番号は <code>pageNumber</code>、総ページ数は <code>totalPages</code>、出力を実行した日時は <code>outputDateTime</code>(文字列)で参照できます。評価結果の文字列がそのままQRコードの内容になります。エラーの場合や内容が長すぎてQRコード化できない場合はPDF上に「#ERROR」と表示されます。</div>
+      ${buildVariableInsertRowHtml(['行番号', 'ページ番号', '総ページ数', '出力時間'])}
+    </div>`
+      : `
+    <div class="prop-row">
+      <span class="field-label">QRコードの内容</span>
+      <textarea class="text-input" id="propStaticText" rows="3">${escapeHtml(field.staticText ?? '')}</textarea>
+      <div class="field-hint">URLや文字列を入力してください。CSVの列を <code>{列名}</code>、行番号を <code>{行番号}</code>、ページ番号を <code>{ページ番号}</code>、総ページ数を <code>{総ページ数}</code>、出力を実行した日時を <code>{出力時間}</code> の形式で埋め込めます(例: https://example.com/{顧客ID})。内容が長すぎてQRコード化できない場合はPDF上に「#ERROR」と表示されます。</div>
+      ${buildVariableInsertRowHtml(['行番号', 'ページ番号', '総ページ数', '出力時間'])}
+    </div>`;
+    sourceRowsHtml = `
+    <div class="prop-row">
+      <label><input type="checkbox" id="propUseJs" ${qrJsMode ? 'checked' : ''} /> 高度な設定: JavaScript式を使う</label>
+    </div>
+    ${qrContentRowHtml}
+    <div class="prop-row">
+      <span class="field-label">誤り訂正レベル</span>
+      <select class="select-input" id="propQrEccLevel">
+        <option value="low">低(約7%・より密になりにくい)</option>
+        <option value="medium">中(約15%・既定)</option>
+        <option value="quartile">高(約25%)</option>
+        <option value="high">最高(約30%・汚れ耐性重視)</option>
+      </select>
+      <div class="field-hint">数値が高いほど汚れ・破損への耐性が上がりますが、同じ内容でもマス目が密になりスキャンしにくくなる場合があります。</div>
+    </div>`;
   } else if (field.kind === 'calc') {
     const jsMode = !!field.useJavaScriptFormula;
     const formulaRowHtml = jsMode
@@ -1152,6 +1220,10 @@ function renderPropsPanel() {
       : `<div class="prop-row"><span class="repeat-status-badge repeat-status-out-frame">📌 枠外(各ページに1回だけ固定描画)</span><div class="field-hint">「一覧表の設定」の青枠内にY座標を移動すると、自動的に繰り返し対象になります。枠外のフィールドに現在のページ番号を表示するには <code>{ページ番号}</code>(JS式では <code>pageNumber</code>)を使ってください({行番号}はここでは使えません)。</div></div>`
   ) : '';
 
+  // QRコードはフォント・横縦配置・はみ出し時・高さの概念が無い(常に正方形の画像として描画される)ため、
+  // プロパティパネルではそれらの行を出さない。幅の入力欄は正方形の一辺の「サイズ」として使い回す。
+  const isQr = field.kind === 'qr';
+
   propsPanel.innerHTML = `
     ${sourceRowsHtml}
     ${dataTypeSettingsHtml}
@@ -1167,6 +1239,7 @@ function renderPropsPanel() {
       <span class="field-label">Y (pt)</span>
       <input type="number" step="0.5" class="text-input mono-input" id="propY" value="${field.y.toFixed(1)}" ${disabledIfLocked} />
     </div>
+    ${isQr ? '' : `
     <div class="prop-row">
       <span class="field-label">フォント</span>
       <select class="select-input" id="propFont">${buildFontOptionsHtml(field.fontFamily)}</select>
@@ -1174,9 +1247,9 @@ function renderPropsPanel() {
     <div class="prop-row">
       <span class="field-label">サイズ (pt)</span>
       <input type="number" step="0.5" min="4" class="text-input mono-input" id="propSize" value="${field.fontSizePt}" />
-    </div>
+    </div>`}
     <div class="prop-row">
-      <span class="field-label">文字色</span>
+      <span class="field-label">${isQr ? 'QRの色' : '文字色'}</span>
       <input type="color" class="text-input" id="propColor" value="${field.color}" />
     </div>
     <div class="prop-row">
@@ -1186,6 +1259,7 @@ function renderPropsPanel() {
         <input type="color" class="text-input" id="propBgColor" value="${field.backgroundColor ?? '#FFFFFF'}" ${field.backgroundColor ? '' : 'disabled'} />
       </div>
     </div>
+    ${isQr ? '' : `
     <div class="prop-row">
       <span class="field-label">横配置</span>
       <select class="select-input" id="propAlign">
@@ -1210,21 +1284,24 @@ function renderPropsPanel() {
         <option value="wrap">折り返し</option>
         <option value="clip">切り詰め</option>
       </select>
-    </div>
+    </div>`}
     <div class="prop-row" id="propMaxWidthRow">
-      <span class="field-label">幅 (pt)</span>
-      <input type="number" step="0.01" min="${MIN_FIELD_WIDTH_PT}" class="text-input mono-input" id="propMaxWidth" value="${field.maxWidthPt.toFixed(2)}" ${disabledIfLocked} />
+      <span class="field-label">${isQr ? 'サイズ (pt・正方形の一辺)' : '幅 (pt)'}</span>
+      <input type="number" step="0.01" min="${isQr ? MIN_QR_SIZE_PT : MIN_FIELD_WIDTH_PT}" class="text-input mono-input" id="propMaxWidth" value="${field.maxWidthPt.toFixed(2)}" ${disabledIfLocked} />
     </div>
+    ${isQr ? '' : `
     <div class="prop-row" id="propHeightRow">
       <span class="field-label">高さ (pt)</span>
       <input type="number" step="0.01" min="${MIN_FIELD_HEIGHT_PT}" class="text-input mono-input" id="propHeight" value="${field.heightPt.toFixed(2)}" ${disabledIfLocked} />
-    </div>
+    </div>`}
     <button class="btn btn-danger" id="propDeleteButton">このフィールドを削除</button>
   `;
 
-  document.getElementById('propAlign').value = field.align;
-  document.getElementById('propVerticalAlign').value = field.verticalAlign;
-  document.getElementById('propOverflow').value = field.overflow;
+  if (!isQr) {
+    document.getElementById('propAlign').value = field.align;
+    document.getElementById('propVerticalAlign').value = field.verticalAlign;
+    document.getElementById('propOverflow').value = field.overflow;
+  }
   if (field.kind === 'csv') {
     document.getElementById('propDataType').value = field.dataType;
     if (field.dataType === 'date') {
@@ -1242,6 +1319,43 @@ function renderPropsPanel() {
     wireVariableInsertButtons('propStaticText', (value) => {
       field.staticText = value;
       renderFieldChips();
+      commitHistory();
+    });
+  } else if (field.kind === 'qr') {
+    document.getElementById('propUseJs').addEventListener('change', (e) => {
+      field.useJavaScriptFormula = e.target.checked;
+      renderFieldChips();
+      renderPropsPanel();
+      commitHistory();
+    });
+    if (field.useJavaScriptFormula) {
+      document.getElementById('propJsFormula').addEventListener('input', (e) => {
+        field.javaScriptFormula = e.target.value;
+        renderFieldChips();
+      });
+      document.getElementById('propJsFormula').addEventListener('change', commitHistory);
+      wireVariableInsertButtons('propJsFormula', (value) => {
+        field.javaScriptFormula = value;
+        renderFieldChips();
+        commitHistory();
+      }, toJsFormulaToken);
+      document.getElementById('propJsFormulaOpenEditor').addEventListener('click', () => openJsEditor(field));
+    } else {
+      document.getElementById('propStaticText').addEventListener('input', (e) => {
+        field.staticText = e.target.value;
+        renderFieldChips();
+      });
+      document.getElementById('propStaticText').addEventListener('change', commitHistory);
+      wireVariableInsertButtons('propStaticText', (value) => {
+        field.staticText = value;
+        renderFieldChips();
+        commitHistory();
+      });
+    }
+    const eccSelect = document.getElementById('propQrEccLevel');
+    eccSelect.value = field.qrErrorCorrectionLevel;
+    eccSelect.addEventListener('change', (e) => {
+      field.qrErrorCorrectionLevel = e.target.value;
       commitHistory();
     });
   } else if (field.kind === 'calc') {
@@ -1336,16 +1450,18 @@ function renderPropsPanel() {
     // 一覧表テンプレートでは、Y移動で「枠内/枠外」の自動判定が変わり得るため、プロパティパネルの表示も更新する。
     if (isListKind) renderPropsPanel();
   });
-  document.getElementById('propFont').addEventListener('change', (e) => {
-    field.fontFamily = e.target.value;
-    renderFieldChips();
-    commitHistory();
-  });
-  document.getElementById('propSize').addEventListener('input', (e) => {
-    field.fontSizePt = parseFloat(e.target.value) || 1;
-    renderFieldChips();
-  });
-  document.getElementById('propSize').addEventListener('change', commitHistory);
+  if (!isQr) {
+    document.getElementById('propFont').addEventListener('change', (e) => {
+      field.fontFamily = e.target.value;
+      renderFieldChips();
+      commitHistory();
+    });
+    document.getElementById('propSize').addEventListener('input', (e) => {
+      field.fontSizePt = parseFloat(e.target.value) || 1;
+      renderFieldChips();
+    });
+    document.getElementById('propSize').addEventListener('change', commitHistory);
+  }
   document.getElementById('propColor').addEventListener('input', (e) => {
     field.color = e.target.value;
     renderFieldChips();
@@ -1363,31 +1479,42 @@ function renderPropsPanel() {
     renderFieldChips();
   });
   document.getElementById('propBgColor').addEventListener('change', commitHistory);
-  document.getElementById('propAlign').addEventListener('change', (e) => {
-    field.align = e.target.value;
-    renderFieldChips();
-    commitHistory();
-  });
-  document.getElementById('propVerticalAlign').addEventListener('change', (e) => {
-    field.verticalAlign = e.target.value;
-    renderFieldChips();
-    commitHistory();
-  });
-  document.getElementById('propOverflow').addEventListener('change', (e) => {
-    field.overflow = e.target.value;
-    renderFieldChips();
-    commitHistory();
-  });
+  if (!isQr) {
+    document.getElementById('propAlign').addEventListener('change', (e) => {
+      field.align = e.target.value;
+      renderFieldChips();
+      commitHistory();
+    });
+    document.getElementById('propVerticalAlign').addEventListener('change', (e) => {
+      field.verticalAlign = e.target.value;
+      renderFieldChips();
+      commitHistory();
+    });
+    document.getElementById('propOverflow').addEventListener('change', (e) => {
+      field.overflow = e.target.value;
+      renderFieldChips();
+      commitHistory();
+    });
+  }
   document.getElementById('propMaxWidth').addEventListener('input', (e) => {
-    field.maxWidthPt = roundTo2(Math.max(parseFloat(e.target.value) || DEFAULT_FIELD_WIDTH_PT, MIN_FIELD_WIDTH_PT));
+    if (isQr) {
+      // QRコードは正方形固定のため、幅の入力欄をそのままサイズとして扱い、高さも連動させる。
+      const sizePt = roundTo2(Math.max(parseFloat(e.target.value) || DEFAULT_QR_SIZE_PT, MIN_QR_SIZE_PT));
+      field.maxWidthPt = sizePt;
+      field.heightPt = sizePt;
+    } else {
+      field.maxWidthPt = roundTo2(Math.max(parseFloat(e.target.value) || DEFAULT_FIELD_WIDTH_PT, MIN_FIELD_WIDTH_PT));
+    }
     renderFieldChips();
   });
   document.getElementById('propMaxWidth').addEventListener('change', commitHistory);
-  document.getElementById('propHeight').addEventListener('input', (e) => {
-    field.heightPt = roundTo2(Math.max(parseFloat(e.target.value) || DEFAULT_FIELD_HEIGHT_PT, MIN_FIELD_HEIGHT_PT));
-    renderFieldChips();
-  });
-  document.getElementById('propHeight').addEventListener('change', commitHistory);
+  if (!isQr) {
+    document.getElementById('propHeight').addEventListener('input', (e) => {
+      field.heightPt = roundTo2(Math.max(parseFloat(e.target.value) || DEFAULT_FIELD_HEIGHT_PT, MIN_FIELD_HEIGHT_PT));
+      renderFieldChips();
+    });
+    document.getElementById('propHeight').addEventListener('change', commitHistory);
+  }
   document.getElementById('propDeleteButton').addEventListener('click', () => {
     deleteField(field.id);
   });

@@ -7,12 +7,13 @@ public enum CsvEncoding
     Utf8
 }
 
-/// <summary>フィールドの種類。CsvはCSVの列値、TextはCSV行に依存しない固定テキスト、Calcは計算式の評価結果を描画する。</summary>
+/// <summary>フィールドの種類。CsvはCSVの列値、TextはCSV行に依存しない固定テキスト、Calcは計算式の評価結果、QrはQRコードを描画する。</summary>
 public enum FieldKind
 {
     Csv,
     Text,
-    Calc
+    Calc,
+    Qr
 }
 
 /// <summary>テンプレートの種類。SingleはCSV1行につき1ページの差込印刷、Listは全行を一覧表示する一覧表。</summary>
@@ -84,4 +85,20 @@ public enum DateFormatKind
     JapaneseWithTime,
     /// <summary>DateCustomFormatに指定した.NET日付書式文字列をそのまま使う。</summary>
     Custom
+}
+
+/// <summary>
+/// FieldKind.QrのQRコードの誤り訂正レベル。数値が高いほど汚れ・破損への耐性が上がる代わりに、
+/// 同じ内容でもモジュール(マス目)が密になり画像が複雑になる(スキャンしにくくなる場合がある)。
+/// </summary>
+public enum QrErrorCorrectionLevel
+{
+    /// <summary>約7%の復元能力。</summary>
+    Low,
+    /// <summary>約15%の復元能力(既定)。</summary>
+    Medium,
+    /// <summary>約25%の復元能力。</summary>
+    Quartile,
+    /// <summary>約30%の復元能力。</summary>
+    High
 }

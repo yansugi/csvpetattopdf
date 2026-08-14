@@ -40,7 +40,17 @@ internal static class Program
         var app = builder.Build();
 
         app.UseDefaultFiles();
-        app.UseStaticFiles();
+        // WebView2は永続的なユーザーデータフォルダ(disk cache)を使うため、Cache-Control未指定だと
+        // アプリを更新してもJS/CSS/HTMLが古いまま表示され続けることがある(例: 起動プロセスを再起動しても
+        // 前回起動時にキャッシュされたeditor.js等が使われ続ける)。ローカル完結型アプリで転送コストの問題も
+        // 無いため、毎回サーバーへ再検証(304 Not Modifiedの条件付きGET)させるno-cacheを明示する。
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            OnPrepareResponse = ctx =>
+            {
+                ctx.Context.Response.Headers.CacheControl = "no-cache";
+            }
+        });
 
         app.MapTemplateEndpoints();
         app.MapCsvEndpoints();

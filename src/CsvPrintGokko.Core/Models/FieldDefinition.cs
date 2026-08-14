@@ -9,7 +9,11 @@ public sealed record FieldDefinition
     /// <summary>Kind=Csvのときに描画元となるCSV列名。Kind=Textのときは未使用。</summary>
     public string? CsvColumn { get; init; }
 
-    /// <summary>Kind=Textのときに、CSVの行に関わらず常に描画される固定テキスト。</summary>
+    /// <summary>
+    /// Kind=Textのときに、CSVの行に関わらず常に描画される固定テキスト。
+    /// Kind=Qrのときは、QRコードにエンコードする内容(テンプレート文字列)としても兼用する。
+    /// どちらも"{列名}"等の変数記法(TextVariableResolver)で置換してから使う。
+    /// </summary>
     public string? StaticText { get; init; }
 
     /// <summary>
@@ -42,11 +46,17 @@ public sealed record FieldDefinition
     /// <summary>背景色(#RRGGBB)。未設定(null)なら背景を描画しない(透明)。</summary>
     public string? BackgroundColor { get; init; }
 
+    /// <summary>Kind=Qrのときの誤り訂正レベル。他のKindでは未使用。</summary>
+    public QrErrorCorrectionLevel QrErrorCorrectionLevel { get; init; } = QrErrorCorrectionLevel.Medium;
+
     public required TextAlign Align { get; init; }
     public VerticalAlign VerticalAlign { get; init; } = VerticalAlign.Top;
     public OverflowBehavior Overflow { get; init; } = OverflowBehavior.None;
 
-    /// <summary>Overflowが None 以外の場合に必須となる最大幅(pt)。</summary>
+    /// <summary>
+    /// Overflowが None 以外の場合に必須となる最大幅(pt)。
+    /// Kind=Qrのときは、QRコードを描画する正方形の一辺の長さ(pt)として使う(未指定なら既定サイズ)。
+    /// </summary>
     public double? MaxWidthPt { get; init; }
 
     /// <summary>Overflowが None 以外の場合に意味を持つボックスの高さ(pt)。</summary>
